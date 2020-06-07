@@ -6,8 +6,13 @@ import (
 	_ "image/png"
 	"math"
 	"math/rand"
+	"os"
 	"time"
 
+	"github.com/faiface/beep"
+	"github.com/faiface/beep/effects"
+	"github.com/faiface/beep/mp3"
+	"github.com/faiface/beep/speaker"
 	"github.com/faiface/pixel"
 	"github.com/faiface/pixel/imdraw"
 	"github.com/faiface/pixel/pixelgl"
@@ -105,6 +110,36 @@ func run() {
 		panic(err)
 	}
 
+	music, _ := os.Open("sound/music.mp3")
+	shootSound, _ := os.Open("sound/shoot.mp3")
+	spawnSound, _ := os.Open("sound/spawn.mp3")
+
+	musicStreamer, musicFormat, err := mp3.Decode(music)
+	if err != nil {
+		panic(err)
+	}
+	defer musicStreamer.Close()
+
+	shootStreamer, shootFormat, err := mp3.Decode(shootSound)
+	if err != nil {
+		panic(err)
+	}
+	shotBuffer := beep.NewBuffer(shootFormat)
+	shotBuffer.Append(shootStreamer)
+	shootStreamer.Close()
+
+	spawnStreamer, spawnFormat, err := mp3.Decode(spawnSound)
+	if err != nil {
+		panic(err)
+	}
+	spawnBuffer := beep.NewBuffer(spawnFormat)
+	spawnBuffer.Append(spawnStreamer)
+
+	spawnStreamer.Close()
+
+	speaker.Init(musicFormat.SampleRate, musicFormat.SampleRate.N(time.Second/10))
+	speaker.Play(musicStreamer)
+
 	// bgColor := color.RGBA{0x16, 0x16, 0x16, 0xff}
 
 	mapRect := imdraw.New(nil)
@@ -132,6 +167,7 @@ func run() {
 	scoreTxt := text.New(pixel.V(-(win.Bounds().W()/2)+50, (win.Bounds().H()/2)-50), atlas)
 
 	var spawnFreq float64
+	var fireRate float64
 	var entities []entityData
 	var bullets []bullet
 	var spawns int
@@ -165,6 +201,7 @@ func run() {
 
 		if gameState == "starting" {
 			spawnFreq = 1.5
+			fireRate = 0.15
 			spawns = 0
 			entities = make([]entityData, 100)
 			bullets = make([]bullet, 100)
@@ -205,7 +242,7 @@ func run() {
 			}
 
 			aim := thumbstickVector(win, currJoystick, pixelgl.AxisRightX, pixelgl.AxisRightY)
-			if last.Sub(lastBullet).Seconds() > 0.15 {
+			if last.Sub(lastBullet).Seconds() > fireRate {
 				if win.Pressed(pixelgl.KeySpace) {
 					scaledX := (win.MousePosition().X - (win.Bounds().W() / 2)) * (canvas.Bounds().W() / win.Bounds().W())
 					scaledY := (win.MousePosition().Y - (win.Bounds().H() / 2)) * (canvas.Bounds().H() / win.Bounds().H())
@@ -231,6 +268,14 @@ func run() {
 					)
 					lastBullet = b.data.born
 					bullets = append(bullets, *b)
+					shot := shotBuffer.Streamer(0, shotBuffer.Len())
+					volume := &effects.Volume{
+						Streamer: shot,
+						Base:     10,
+						Volume:   -0.7,
+						Silent:   false,
+					}
+					speaker.Play(volume)
 				}
 			}
 
@@ -329,9 +374,6 @@ func run() {
 			// spawn entities
 			if last.Sub(lastSpawn).Seconds() > spawnFreq {
 				// spawn
-				if spawns%50 == 0 {
-					spawnCount = 10
-				}
 				for i := 0; i < spawnCount; i++ {
 					pos := pixel.V(
 						float64(rand.Intn(worldWidth)-worldWidth/2),
@@ -353,12 +395,28 @@ func run() {
 					entities = append(entities, *enemy)
 					spawns += 1
 				}
+
+				spawnSound := spawnBuffer.Streamer(0, spawnBuffer.Len())
+				speaker.Play(spawnSound)
+				spawnStreamer.Seek(0)
 				lastSpawn = time.Now()
-				spawnCount = 1
+				if spawns%10 == 0 {
+					spawnCount += 1
+				}
 
 				if spawns%5 == 0 && spawnFreq > 0.2 {
 					spawnFreq -= 0.1
 				}
+			}
+
+			// adjust game rules
+
+			if score > 10000 && fireRate > 0.05 {
+				fireRate = 0.05
+			}
+
+			if score > 20000 && fireRate > 0.02 {
+				fireRate = 0.02
 			}
 
 		} else {
