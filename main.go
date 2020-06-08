@@ -25,10 +25,11 @@ const worldWidth = 1200
 const worldHeight = 800
 
 type entityData struct {
-	born  time.Time
-	rect  pixel.Rect
-	alive bool
-	speed float64
+	orientation pixel.Vec
+	born        time.Time
+	rect        pixel.Rect
+	alive       bool
+	speed       float64
 }
 
 type bullet struct {
@@ -38,6 +39,7 @@ type bullet struct {
 
 func NewEntity(x float64, y float64, size float64, speed float64) *entityData {
 	p := new(entityData)
+	p.orientation = pixel.V(0.0, 1.0)
 	p.rect = pixel.R(x-(size/2), y-(size/2), x+(size/2), y+(size/2))
 	p.speed = speed
 	p.alive = true
@@ -48,6 +50,7 @@ func NewEntity(x float64, y float64, size float64, speed float64) *entityData {
 func NewBullet(x float64, y float64, speed float64, target pixel.Vec) *bullet {
 	b := new(bullet)
 	b.data = *NewEntity(x, y, 3, speed)
+	b.data.orientation = target
 	b.velocity = target.Scaled(speed)
 	return b
 }
@@ -68,6 +71,57 @@ func thumbstickVector(win *pixelgl.Window, joystick pixelgl.Joystick, axisX pixe
 		v = pixel.V(x, y)
 	}
 	return v
+}
+
+func drawBullet(bullet *entityData, d *imdraw.IMDraw) {
+	p1 := pixel.ZV.Add(pixel.V(0.0, 5.0))
+	p2 := p1.Add(pixel.V(5.0, -10.0))
+	p3 := p1.Add(pixel.V(-5.0, -10.0))
+	d.Push(p1, p2, pixel.ZV, p3)
+	d.Polygon(1)
+}
+
+func (player *entityData) draw(d *imdraw.IMDraw) {
+	weight := 2.0
+	outline := 8.0
+	p := pixel.ZV.Add(pixel.V(0.0, -20.0))
+	pInner := p.Add(pixel.V(0, outline))
+	l1 := p.Add(pixel.V(-10.0, -10.0))
+	l1Inner := l1.Add(pixel.V(0, outline))
+	r1 := p.Add(pixel.V(10.0, -10.0))
+	r1Inner := r1.Add(pixel.V(0.0, outline))
+	d.Push(p, l1)
+	d.Line(weight)
+	d.Push(pInner, l1Inner)
+	d.Line(weight)
+	d.Push(p, r1)
+	d.Line(weight)
+	d.Push(pInner, r1Inner)
+	d.Line(weight)
+
+	l2 := l1.Add(pixel.V(-15, 15))
+	l2Inner := l2.Add(pixel.V(outline, 0.0))
+	r2 := r1.Add(pixel.V(15, 15))
+	r2Inner := r2.Add(pixel.V(-outline, 0.0))
+	d.Push(l1, l2)
+	d.Line(weight)
+	d.Push(l1Inner, l2Inner)
+	d.Line(weight)
+	d.Push(r1, r2)
+	d.Line(weight)
+	d.Push(r1Inner, r2Inner)
+	d.Line(weight)
+
+	l3 := l2.Add(pixel.V(15, 30))
+	r3 := r2.Add(pixel.V(-15, 30))
+	d.Push(l2, l3)
+	d.Line(weight)
+	d.Push(r2, r3)
+	d.Line(weight)
+	d.Push(l2Inner, l3)
+	d.Line(weight)
+	d.Push(r2Inner, r3)
+	d.Line(weight)
 }
 
 func (p *entityData) enforceWorldBoundary() { // this code seems dumb, TODO: find some api call that does it
@@ -187,6 +241,8 @@ func run() {
 
 	canvas := pixelgl.NewCanvas(pixel.R(-cfg.Bounds.W()/2, -cfg.Bounds.H()/2, cfg.Bounds.W()/2, cfg.Bounds.H()/2))
 	imd := imdraw.New(nil)
+	playerDraw := imdraw.New(nil)
+	bulletDraw := imdraw.New(nil)
 	camPos := pixel.ZV
 	last := time.Now()
 	lastSpawn := time.Now()
@@ -197,6 +253,7 @@ func run() {
 	rand.Seed(time.Now().Unix())
 	atlas := text.NewAtlas(basicfont.Face7x13, text.ASCII)
 	gameOverTxt := text.New(pixel.V(0, 0), atlas)
+	pausedTxt := text.New(pixel.V(0, 0), atlas)
 	scoreTxt := text.New(pixel.V(-(win.Bounds().W()/2)+120, (win.Bounds().H()/2)-50), atlas)
 	livesTxt := text.New(pixel.V(0.0, (win.Bounds().H()/2)-50), atlas)
 
@@ -232,6 +289,9 @@ func run() {
 	}
 
 	gameState := "starting"
+
+	// precache player draw
+	player.draw(playerDraw)
 	for !win.Closed() {
 		// update
 		dt := time.Since(last).Seconds()
@@ -245,6 +305,12 @@ func run() {
 		)
 		cam := pixel.IM.Moved(camPos.Scaled(-1))
 		canvas.SetMatrix(cam)
+
+		if gameState == "paused" {
+			if win.Pressed(pixelgl.KeyEnter) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonA) {
+				gameState = "playing"
+			}
+		}
 
 		if gameState == "starting" {
 			lives = 3
@@ -283,6 +349,15 @@ func run() {
 				multiplierReward = 500
 			}
 
+			if win.Pressed(pixelgl.KeyP) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonStart) {
+				gameState = "paused"
+				pausedTxt.Clear()
+				line := "Paused."
+
+				pausedTxt.Dot.X -= (pausedTxt.BoundsOf(line).W() / 2)
+				fmt.Fprintln(pausedTxt, line)
+			}
+
 			// player controls
 			direction := pixel.V(0.0, 0.0)
 			if win.Pressed(pixelgl.KeyLeft) || win.Pressed(pixelgl.KeyA) {
@@ -308,7 +383,13 @@ func run() {
 				direction = direction.Add(moveVec)
 			}
 
-			if direction.Len() > 0 {
+			if direction.Len() > 0.5 {
+				orientationDt := (pixel.Lerp(
+					player.orientation,
+					direction,
+					1-math.Pow(1.0/512, dt),
+				))
+				player.orientation = orientationDt
 				player.rect = player.rect.Moved(direction.Scaled(player.speed * dt))
 			}
 
@@ -358,13 +439,21 @@ func run() {
 						)
 						bullets = append(bullets, *b)
 					} else {
-						b := NewBullet(
-							player.rect.Center().X,
-							player.rect.Center().Y,
+						b1Pos := pixel.V(5.0, 8.0).Rotated(aim.Angle()).Add(player.rect.Center())
+						b2Pos := pixel.V(5.0, -8.0).Rotated(aim.Angle()).Add(player.rect.Center())
+						b1 := NewBullet(
+							b1Pos.X,
+							b1Pos.Y,
 							1200,
 							aim.Unit(),
 						)
-						bullets = append(bullets, *b)
+						b2 := NewBullet(
+							b2Pos.X,
+							b2Pos.Y,
+							1200,
+							aim.Unit(),
+						)
+						bullets = append(bullets, *b1, *b2)
 					}
 					lastBullet = time.Now()
 					bulletsFired += 1
@@ -549,32 +638,36 @@ func run() {
 				waveStart = time.Time{}
 			}
 
-			if last.Sub(waveStart).Seconds() < waveDuration && last.Sub(lastWaveSpawn).Seconds() > 0.2 {
+			if last.Sub(waveStart).Seconds() < waveDuration {
 				// Continue wave
 				// TODO make these data driven
 				// waves would have spawn points, and spawn counts, and probably durations and stuff
+				// hardcoded for now :D
 
-				// 4 spawn points
-				points := [4]pixel.Vec{
-					pixel.V(-(worldWidth/2)+50, -(worldHeight/2)+50),
-					pixel.V(-(worldWidth/2)+50, (worldHeight/2)-50),
-					pixel.V((worldWidth/2)-50, -(worldHeight/2)+50),
-					pixel.V((worldWidth/2)-50, (worldHeight/2)-50),
-				}
+				if last.Sub(lastWaveSpawn).Seconds() > 0.2 {
 
-				for _, p := range points {
-					enemy := NewEntity(
-						p.X,
-						p.Y,
-						20,
-						130,
-					)
-					entities = append(entities, *enemy)
-					spawns += 1
+					// 4 spawn points
+					points := [4]pixel.Vec{
+						pixel.V(-(worldWidth/2)+50, -(worldHeight/2)+50),
+						pixel.V(-(worldWidth/2)+50, (worldHeight/2)-50),
+						pixel.V((worldWidth/2)-50, -(worldHeight/2)+50),
+						pixel.V((worldWidth/2)-50, (worldHeight/2)-50),
+					}
+
+					for _, p := range points {
+						enemy := NewEntity(
+							p.X,
+							p.Y,
+							50,
+							130,
+						)
+						entities = append(entities, *enemy)
+						spawns += 1
+					}
+					spawnSound := spawnBuffer.Streamer(0, spawnBuffer.Len())
+					speaker.Play(spawnSound)
+					lastWaveSpawn = time.Now()
 				}
-				spawnSound := spawnBuffer.Streamer(0, spawnBuffer.Len())
-				speaker.Play(spawnSound)
-				lastWaveSpawn = time.Now()
 			}
 
 			// adjust game rules
@@ -611,7 +704,7 @@ func run() {
 			}
 
 			if score >= 10000 && fireRate > 0.1 {
-				fireRate = 0.05
+				fireRate = 0.1
 			}
 
 			if score >= 20000 && fireMode != "conic" {
@@ -630,8 +723,13 @@ func run() {
 		if gameState == "playing" {
 			// draw player
 			imd.Color = colornames.White
-			imd.Push(player.rect.Min, player.rect.Max)
-			imd.Rectangle(2)
+			d := imdraw.New(nil)
+			d.SetMatrix(pixel.IM.Rotated(pixel.ZV, player.orientation.Angle()-math.Pi/2).Moved(player.rect.Center()))
+			playerDraw.Draw(d)
+			d.Draw(imd)
+
+			// imd.Push(player.rect.Min, player.rect.Max)
+			// imd.Rectangle(2)
 
 			// draw enemies
 			imd.Color = colornames.Lightskyblue
@@ -642,11 +740,13 @@ func run() {
 				}
 			}
 
-			imd.Color = colornames.Lightgoldenrodyellow
+			bulletDraw.Color = colornames.Lightgoldenrodyellow
 			for _, b := range bullets {
 				if b.data.alive {
-					imd.Push(b.data.rect.Center())
-					imd.Circle(3, 1)
+					bulletDraw.Clear()
+					bulletDraw.SetMatrix(pixel.IM.Rotated(pixel.ZV, b.data.orientation.Angle()-math.Pi/2).Moved(b.data.rect.Center()))
+					drawBullet(&b.data, bulletDraw)
+					bulletDraw.Draw(imd)
 				}
 			}
 		}
@@ -688,6 +788,14 @@ func run() {
 			livesTxt.Draw(
 				win,
 				pixel.IM.Scaled(livesTxt.Orig, 2),
+			)
+		} else if gameState == "paused" {
+			pausedTxt.Draw(
+				win,
+				pixel.IM.Scaled(
+					pausedTxt.Orig,
+					5,
+				),
 			)
 		} else if gameState == "game_over" {
 			gameOverTxt.Draw(
