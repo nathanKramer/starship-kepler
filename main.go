@@ -160,11 +160,13 @@ func run() {
 	last := time.Now()
 	lastSpawn := time.Now()
 	lastBullet := time.Now()
+	lastBomb := time.Now()
 
 	rand.Seed(time.Now().Unix())
 	atlas := text.NewAtlas(basicfont.Face7x13, text.ASCII)
 	gameOverTxt := text.New(pixel.V(0, 0), atlas)
-	scoreTxt := text.New(pixel.V(-(win.Bounds().W()/2)+50, (win.Bounds().H()/2)-50), atlas)
+	scoreTxt := text.New(pixel.V(-(win.Bounds().W()/2)+120, (win.Bounds().H()/2)-50), atlas)
+	livesTxt := text.New(pixel.V(0.0, (win.Bounds().H()/2)-50), atlas)
 
 	var spawnFreq float64
 	var fireRate float64
@@ -172,6 +174,13 @@ func run() {
 	var bullets []bullet
 	var spawns int
 	var spawnCount int
+	var lives int
+	var lifeReward int
+	var bombReward int
+	var bombs int
+	var scoreMultiplier int
+	var multiplierReward int
+	var scoreSinceBorn int
 	player := NewEntity(0.0, 0.0, 50, 280)
 	score := 0
 
@@ -200,18 +209,34 @@ func run() {
 		canvas.SetMatrix(cam)
 
 		if gameState == "starting" {
+			lives = 3
+			bombs = 3
 			spawnFreq = 1.5
-			fireRate = 0.15
+			fireRate = 0.25
 			spawns = 0
 			entities = make([]entityData, 100)
 			bullets = make([]bullet, 100)
 			player = NewEntity(0.0, 0.0, 50, 280)
 			gameState = "playing"
 			score = 0
+			scoreSinceBorn = 0
+			scoreMultiplier = 1
+			multiplierReward = 500
 			spawnCount = 1
+			lifeReward = 100000
+			bombReward = 100000
 		}
 
 		if gameState == "playing" {
+			if !player.alive {
+				entities = make([]entityData, 100)
+				bullets = make([]bullet, 100)
+				player = NewEntity(0.0, 0.0, 50, 280)
+				scoreMultiplier = 1
+				scoreSinceBorn = 0
+				multiplierReward = 500
+			}
+
 			// player controls
 			direction := pixel.V(0.0, 0.0)
 			if win.Pressed(pixelgl.KeyLeft) || win.Pressed(pixelgl.KeyA) {
@@ -260,13 +285,14 @@ func run() {
 				}
 
 				if aim.Len() > 0 {
+					// fmt.Printf("Bullet spawned %s", time.Now().String())
 					b := NewBullet(
 						player.rect.Center().X,
 						player.rect.Center().Y,
 						1200,
 						aim.Unit(),
 					)
-					lastBullet = b.data.born
+					lastBullet = time.Now()
 					bullets = append(bullets, *b)
 					shot := shotBuffer.Streamer(0, shotBuffer.Len())
 					volume := &effects.Volume{
@@ -314,13 +340,14 @@ func run() {
 			}
 
 			for bID, b := range bullets {
-				if b.data.rect.W() > 0 {
+				if b.data.rect.W() > 0 && b.data.alive {
 					for eID, e := range entities {
 						if e.rect.W() > 0 {
 							if b.data.rect.Intersects(e.rect) {
 								b.data.alive = false
 								e.alive = false
-								score += 50
+								score += 50 * scoreMultiplier
+								scoreSinceBorn += 50 * scoreMultiplier
 								bullets[bID] = b
 								entities[eID] = e
 								break
@@ -337,19 +364,35 @@ func run() {
 			for _, e := range entities {
 				if e.alive && e.rect.W() > 0 {
 					if e.rect.Intersects(player.rect) {
-						gameState = "game_over"
+						lives -= 1
+						if lives == 0 {
+							gameState = "game_over"
 
-						gameOverTxt.Clear()
-						lines := []string{
-							"Game Over.",
-							"Score: " + fmt.Sprintf("%d", score),
-							"Press enter to restart",
-						}
-						for _, line := range lines {
-							gameOverTxt.Dot.X -= (gameOverTxt.BoundsOf(line).W() / 2)
-							fmt.Fprintln(gameOverTxt, line)
+							gameOverTxt.Clear()
+							lines := []string{
+								"Game Over.",
+								"Score: " + fmt.Sprintf("%d", score),
+								"Press enter to restart",
+							}
+							for _, line := range lines {
+								gameOverTxt.Dot.X -= (gameOverTxt.BoundsOf(line).W() / 2)
+								fmt.Fprintln(gameOverTxt, line)
+							}
+						} else {
+							player.alive = false
 						}
 					}
+				}
+			}
+
+			// check for bomb here for now
+			bombPressed := win.Pressed(pixelgl.KeyR) || win.JoystickAxis(currJoystick, pixelgl.AxisRightTrigger) > 0.1
+			if bombs > 0 && bombPressed && last.Sub(lastBomb).Seconds() > 3.0 {
+				lastBomb = time.Now()
+				bombs -= 1
+				for eID, e := range entities {
+					e.alive = false
+					entities[eID] = e
 				}
 			}
 
@@ -411,6 +454,21 @@ func run() {
 
 			// adjust game rules
 
+			if score > lifeReward {
+				lifeReward += 100000
+				lives += 1
+			}
+
+			if score > bombReward {
+				bombReward += 100000
+				bombs += 1
+			}
+
+			if scoreSinceBorn > multiplierReward && scoreMultiplier < 10 {
+				scoreMultiplier += 1
+				multiplierReward *= 2
+			}
+
 			if score > 10000 && fireRate > 0.05 {
 				fireRate = 0.05
 			}
@@ -468,10 +526,27 @@ func run() {
 
 		if gameState == "playing" {
 			scoreTxt.Clear()
-			fmt.Fprintf(scoreTxt, "Score: %d", score)
+			txt := "Score: %d\n"
+			scoreTxt.Dot.X -= (scoreTxt.BoundsOf(txt).W() / 2)
+			fmt.Fprintf(scoreTxt, txt, score)
+			txt = "X%d"
+			scoreTxt.Dot.X -= (scoreTxt.BoundsOf(txt).W() / 2)
+			fmt.Fprintf(scoreTxt, txt, scoreMultiplier)
 			scoreTxt.Draw(
 				win,
 				pixel.IM.Scaled(scoreTxt.Orig, 2),
+			)
+
+			livesTxt.Clear()
+			txt = "Lives: %d\n"
+			livesTxt.Dot.X -= (livesTxt.BoundsOf(txt).W() / 2)
+			fmt.Fprintf(livesTxt, txt, lives)
+			txt = "Bombs: %d"
+			livesTxt.Dot.X -= (livesTxt.BoundsOf(txt).W() / 2)
+			fmt.Fprintf(livesTxt, txt, bombs)
+			livesTxt.Draw(
+				win,
+				pixel.IM.Scaled(livesTxt.Orig, 2),
 			)
 		} else if gameState == "game_over" {
 			gameOverTxt.Draw(
