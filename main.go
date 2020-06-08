@@ -110,9 +110,14 @@ func run() {
 		panic(err)
 	}
 
+	// SOUNDS
+
 	music, _ := os.Open("sound/music.mp3")
 	shootSound, _ := os.Open("sound/shoot.mp3")
 	spawnSound, _ := os.Open("sound/spawn.mp3")
+	lifeSound, _ := os.Open("sound/life.mp3")
+	multiplierSound, _ := os.Open("sound/multiplierbonus.mp3")
+	bombSound, _ := os.Open("sound/usebomb.mp3")
 
 	musicStreamer, musicFormat, err := mp3.Decode(music)
 	if err != nil {
@@ -134,11 +139,36 @@ func run() {
 	}
 	spawnBuffer := beep.NewBuffer(spawnFormat)
 	spawnBuffer.Append(spawnStreamer)
-
 	spawnStreamer.Close()
+
+	lifeStreamer, lifeFormat, err := mp3.Decode(lifeSound)
+	if err != nil {
+		panic(err)
+	}
+	lifeBuffer := beep.NewBuffer(lifeFormat)
+	lifeBuffer.Append(lifeStreamer)
+	lifeStreamer.Close()
+
+	multiplierStreamer, multiplierFormat, err := mp3.Decode(multiplierSound)
+	if err != nil {
+		panic(err)
+	}
+	multiplierBuffer := beep.NewBuffer(multiplierFormat)
+	multiplierBuffer.Append(multiplierStreamer)
+	multiplierStreamer.Close()
+
+	bombStreamer, bombFormat, err := mp3.Decode(bombSound)
+	if err != nil {
+		panic(err)
+	}
+	bombBuffer := beep.NewBuffer(bombFormat)
+	bombBuffer.Append(bombStreamer)
+	bombStreamer.Close()
 
 	speaker.Init(musicFormat.SampleRate, musicFormat.SampleRate.N(time.Second/10))
 	speaker.Play(musicStreamer)
+
+	// END SOUNDS
 
 	// bgColor := color.RGBA{0x16, 0x16, 0x16, 0xff}
 
@@ -388,7 +418,16 @@ func run() {
 			// check for bomb here for now
 			bombPressed := win.Pressed(pixelgl.KeyR) || win.JoystickAxis(currJoystick, pixelgl.AxisRightTrigger) > 0.1
 			if bombs > 0 && bombPressed && last.Sub(lastBomb).Seconds() > 3.0 {
+				sound := bombBuffer.Streamer(0, bombBuffer.Len())
+				// volume := &effects.Volume{
+				// 	Streamer: shot,
+				// 	Base:     10,
+				// 	Volume:   -0.7,
+				// 	Silent:   false,
+				// }
+				speaker.Play(sound)
 				lastBomb = time.Now()
+
 				bombs -= 1
 				for eID, e := range entities {
 					e.alive = false
@@ -454,26 +493,42 @@ func run() {
 
 			// adjust game rules
 
-			if score > lifeReward {
+			if score >= lifeReward {
 				lifeReward += 100000
 				lives += 1
+				sound := lifeBuffer.Streamer(0, lifeBuffer.Len())
+				// volume := &effects.Volume{
+				// 	Streamer: shot,
+				// 	Base:     10,
+				// 	Volume:   -0.7,
+				// 	Silent:   false,
+				// }
+				speaker.Play(sound)
 			}
 
-			if score > bombReward {
+			if score >= bombReward {
 				bombReward += 100000
 				bombs += 1
 			}
 
-			if scoreSinceBorn > multiplierReward && scoreMultiplier < 10 {
+			if scoreSinceBorn >= multiplierReward && scoreMultiplier < 10 {
+				sound := multiplierBuffer.Streamer(0, multiplierBuffer.Len())
+				// volume := &effects.Volume{
+				// 	Streamer: shot,
+				// 	Base:     10,
+				// 	Volume:   -0.7,
+				// 	Silent:   false,
+				// }
+				speaker.Play(sound)
 				scoreMultiplier += 1
 				multiplierReward *= 2
 			}
 
-			if score > 10000 && fireRate > 0.05 {
+			if score >= 10000 && fireRate > 0.05 {
 				fireRate = 0.05
 			}
 
-			if score > 20000 && fireRate > 0.02 {
+			if score >= 20000 && fireRate > 0.02 {
 				fireRate = 0.02
 			}
 
