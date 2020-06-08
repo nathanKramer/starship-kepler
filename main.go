@@ -6,12 +6,9 @@ import (
 	_ "image/png"
 	"math"
 	"math/rand"
-	"os"
 	"time"
 
-	"github.com/faiface/beep"
 	"github.com/faiface/beep/effects"
-	"github.com/faiface/beep/mp3"
 	"github.com/faiface/beep/speaker"
 	"github.com/faiface/pixel"
 	"github.com/faiface/pixel/imdraw"
@@ -23,6 +20,8 @@ import (
 
 const worldWidth = 1200
 const worldHeight = 800
+
+// ENTITIES
 
 type entityData struct {
 	orientation pixel.Vec
@@ -55,6 +54,117 @@ func NewBullet(x float64, y float64, speed float64, target pixel.Vec) *bullet {
 	return b
 }
 
+// STATE
+
+type wavedata struct {
+	waveDuration float64
+	waveStart    time.Time
+	waveEnd      time.Time
+	lastSpawn    time.Time
+}
+
+type weapondata struct {
+	fireRate     float64
+	fireMode     string
+	bulletsFired int
+}
+
+type gamedata struct {
+	lives           int
+	bombs           int
+	scoreMultiplier int
+	entities        []entityData
+	bullets         []bullet
+	spawns          int
+	spawnCount      int
+	scoreSinceBorn  int
+	player          entityData
+	weapon          weapondata
+	waves           []wavedata
+
+	score            int
+	lifeReward       int
+	bombReward       int
+	multiplierReward int
+	waveFreq         float64
+	spawnFreq        float64
+
+	lastSpawn  time.Time
+	lastBullet time.Time
+	lastBomb   time.Time
+}
+
+type game struct {
+	state string
+	data  gamedata
+}
+
+func NewWaveData() *wavedata {
+	waveData := new(wavedata)
+	waveData.waveDuration = 5
+	waveData.waveStart = time.Time{}
+	waveData.waveEnd = time.Now()
+	return waveData
+}
+
+func NewWeaponData() *weapondata {
+	weaponData := new(weapondata)
+	weaponData.fireRate = 0.25
+	weaponData.fireMode = "normal"
+	weaponData.bulletsFired = 0
+
+	return weaponData
+}
+
+func NewGameData() *gamedata {
+	gameData := new(gamedata)
+	gameData.lives = 3
+	gameData.bombs = 3
+	gameData.scoreMultiplier = 1
+	gameData.entities = make([]entityData, 100)
+	gameData.bullets = make([]bullet, 100)
+	gameData.player = *NewEntity(0.0, 0.0, 50, 280)
+	gameData.spawns = 0
+	gameData.spawnCount = 1
+	gameData.scoreSinceBorn = 0
+	gameData.weapon = *NewWeaponData()
+
+	gameData.score = 0
+	gameData.multiplierReward = 500
+	gameData.lifeReward = 100000
+	gameData.bombReward = 100000
+	gameData.waveFreq = 30
+	gameData.spawnFreq = 1.5
+
+	gameData.lastSpawn = time.Now()
+	gameData.lastBullet = time.Now()
+	gameData.lastBomb = time.Now()
+
+	return gameData
+}
+
+func NewGame() *game {
+	game := new(game)
+	game.state = "starting"
+	game.data = *NewGameData()
+
+	return game
+}
+
+func (data *gamedata) respawnPlayer() {
+	data.entities = make([]entityData, 100)
+	data.bullets = make([]bullet, 100)
+	data.weapon = *NewWeaponData()
+	data.player = *NewEntity(0.0, 0.0, 50, 280)
+	data.scoreMultiplier = 1
+	data.scoreSinceBorn = 0
+}
+
+func (game *game) respawnPlayer() {
+	game.data.respawnPlayer()
+	game.data.multiplierReward = 500
+}
+
 func thumbstickVector(win *pixelgl.Window, joystick pixelgl.Joystick, axisX pixelgl.GamepadAxis, axisY pixelgl.GamepadAxis) pixel.Vec {
 	v := pixel.V(0.0, 0.0)
 	if win.JoystickPresent(joystick) {
@@ -81,7 +191,7 @@ func drawBullet(bullet *entityData, d *imdraw.IMDraw) {
 	d.Polygon(1)
 }
 
-func (player *entityData) draw(d *imdraw.IMDraw) {
+func drawShip(d *imdraw.IMDraw) {
 	weight := 2.0
 	outline := 8.0
 	p := pixel.ZV.Add(pixel.V(0.0, -20.0))
@@ -147,6 +257,10 @@ func (p *entityData) enforceWorldBoundary() { // this code seems dumb, TODO: fin
 	}
 }
 
+func init() {
+	rand.Seed(time.Now().Unix())
+}
+
 // resist the urge to refactor. just write a game, don't worry about clean code.
 func run() {
 	// monitor := pixelgl.PrimaryMonitor()
@@ -164,66 +278,6 @@ func run() {
 	if err != nil {
 		panic(err)
 	}
-
-	// SOUNDS
-
-	music, _ := os.Open("sound/music.mp3")
-	shootSound, _ := os.Open("sound/shoot.mp3")
-	spawnSound, _ := os.Open("sound/spawn.mp3")
-	lifeSound, _ := os.Open("sound/life.mp3")
-	multiplierSound, _ := os.Open("sound/multiplierbonus.mp3")
-	bombSound, _ := os.Open("sound/usebomb.mp3")
-
-	musicStreamer, musicFormat, err := mp3.Decode(music)
-	if err != nil {
-		panic(err)
-	}
-	defer musicStreamer.Close()
-
-	shootStreamer, shootFormat, err := mp3.Decode(shootSound)
-	if err != nil {
-		panic(err)
-	}
-	shotBuffer := beep.NewBuffer(shootFormat)
-	shotBuffer.Append(shootStreamer)
-	shootStreamer.Close()
-
-	spawnStreamer, spawnFormat, err := mp3.Decode(spawnSound)
-	if err != nil {
-		panic(err)
-	}
-	spawnBuffer := beep.NewBuffer(spawnFormat)
-	spawnBuffer.Append(spawnStreamer)
-	spawnStreamer.Close()
-
-	lifeStreamer, lifeFormat, err := mp3.Decode(lifeSound)
-	if err != nil {
-		panic(err)
-	}
-	lifeBuffer := beep.NewBuffer(lifeFormat)
-	lifeBuffer.Append(lifeStreamer)
-	lifeStreamer.Close()
-
-	multiplierStreamer, multiplierFormat, err := mp3.Decode(multiplierSound)
-	if err != nil {
-		panic(err)
-	}
-	multiplierBuffer := beep.NewBuffer(multiplierFormat)
-	multiplierBuffer.Append(multiplierStreamer)
-	multiplierStreamer.Close()
-
-	bombStreamer, bombFormat, err := mp3.Decode(bombSound)
-	if err != nil {
-		panic(err)
-	}
-	bombBuffer := beep.NewBuffer(bombFormat)
-	bombBuffer.Append(bombStreamer)
-	bombStreamer.Close()
-
-	speaker.Init(musicFormat.SampleRate, musicFormat.SampleRate.N(time.Second/10))
-	speaker.Play(musicStreamer)
-
-	// END SOUNDS
 
 	// bgColor := color.RGBA{0x16, 0x16, 0x16, 0xff}
 
@@ -244,41 +298,18 @@ func run() {
 	playerDraw := imdraw.New(nil)
 	bulletDraw := imdraw.New(nil)
 	camPos := pixel.ZV
-	last := time.Now()
-	lastSpawn := time.Now()
-	lastWaveSpawn := time.Now()
-	lastBullet := time.Now()
-	lastBomb := time.Now()
 
-	rand.Seed(time.Now().Unix())
+	// Game initialization
+	last := time.Now()
+
+	// Fonts
 	atlas := text.NewAtlas(basicfont.Face7x13, text.ASCII)
 	gameOverTxt := text.New(pixel.V(0, 0), atlas)
 	pausedTxt := text.New(pixel.V(0, 0), atlas)
 	scoreTxt := text.New(pixel.V(-(win.Bounds().W()/2)+120, (win.Bounds().H()/2)-50), atlas)
 	livesTxt := text.New(pixel.V(0.0, (win.Bounds().H()/2)-50), atlas)
 
-	var spawnFreq float64
-	var waveDuration float64
-	var waveFreq float64
-	var waveStart time.Time
-	var waveEnd time.Time
-	var fireRate float64
-	var fireMode string
-	var entities []entityData
-	var bullets []bullet
-	var bulletsFired int
-	var spawns int
-	var spawnCount int
-	var lives int
-	var lifeReward int
-	var bombReward int
-	var bombs int
-	var scoreMultiplier int
-	var multiplierReward int
-	var scoreSinceBorn int
-	player := NewEntity(0.0, 0.0, 50, 280)
-	score := 0
-
+	// Input initialization
 	currJoystick := pixelgl.Joystick1
 	for i := pixelgl.Joystick1; i <= pixelgl.JoystickLast; i++ {
 		if win.JoystickPresent(i) {
@@ -288,14 +319,18 @@ func run() {
 		}
 	}
 
-	gameState := "starting"
+	game := NewGame()
 
 	// precache player draw
-	player.draw(playerDraw)
+	drawShip(playerDraw)
+	playMusic()
+
 	for !win.Closed() {
 		// update
 		dt := time.Since(last).Seconds()
 		last = time.Now()
+
+		player := &game.data.player
 
 		// lerp the camera position towards the player
 		camPos = pixel.Lerp(
@@ -306,51 +341,24 @@ func run() {
 		cam := pixel.IM.Moved(camPos.Scaled(-1))
 		canvas.SetMatrix(cam)
 
-		if gameState == "paused" {
+		if game.state == "paused" {
 			if win.Pressed(pixelgl.KeyEnter) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonA) {
-				gameState = "playing"
+				game.state = "playing"
 			}
 		}
 
-		if gameState == "starting" {
-			lives = 3
-			bombs = 3
-			spawnFreq = 1.5
-			waveDuration = 5
-			waveFreq = 30
-			waveStart = time.Time{}
-			waveEnd = time.Now()
-			fireRate = 0.25
-			fireMode = "normal"
-			spawns = 0
-			entities = make([]entityData, 100)
-			bullets = make([]bullet, 100)
-			bulletsFired = 0
-			player = NewEntity(0.0, 0.0, 50, 280)
-			gameState = "playing"
-			score = 0
-			scoreSinceBorn = 0
-			scoreMultiplier = 1
-			multiplierReward = 500
-			spawnCount = 1
-			lifeReward = 100000
-			bombReward = 100000
+		if game.state == "starting" {
+			game.data = *NewGameData()
+			game.state = "playing"
 		}
 
-		if gameState == "playing" {
+		if game.state == "playing" {
 			if !player.alive {
-				entities = make([]entityData, 100)
-				bullets = make([]bullet, 100)
-				bulletsFired = 0
-				waveStart = time.Time{}
-				player = NewEntity(0.0, 0.0, 50, 280)
-				scoreMultiplier = 1
-				scoreSinceBorn = 0
-				multiplierReward = 500
+				game.respawnPlayer()
 			}
 
 			if win.Pressed(pixelgl.KeyP) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonStart) {
-				gameState = "paused"
+				game.state = "paused"
 				pausedTxt.Clear()
 				line := "Paused."
 
@@ -394,7 +402,7 @@ func run() {
 			}
 
 			aim := thumbstickVector(win, currJoystick, pixelgl.AxisRightX, pixelgl.AxisRightY)
-			if last.Sub(lastBullet).Seconds() > fireRate {
+			if last.Sub(game.data.lastBullet).Seconds() > game.data.weapon.fireRate {
 				if win.Pressed(pixelgl.KeySpace) {
 					scaledX := (win.MousePosition().X - (win.Bounds().W() / 2)) * (canvas.Bounds().W() / win.Bounds().W())
 					scaledY := (win.MousePosition().Y - (win.Bounds().H() / 2)) * (canvas.Bounds().H() / win.Bounds().H())
@@ -413,7 +421,7 @@ func run() {
 
 				if aim.Len() > 0 {
 					// fmt.Printf("Bullet spawned %s", time.Now().String())
-					if fireMode == "conic" {
+					if game.data.weapon.fireMode == "conic" {
 						rad := math.Atan2(aim.Unit().Y, aim.Unit().X)
 						ang1 := rad + (10 * (2 * math.Pi) / 360)
 						ang2 := rad - (10 * (2 * math.Pi) / 360)
@@ -421,7 +429,7 @@ func run() {
 						ang2Vec := pixel.V(math.Cos(ang2), math.Sin(ang2))
 
 						var bulletAngle pixel.Vec
-						switch i := bulletsFired % 4; i {
+						switch i := game.data.weapon.bulletsFired % 4; i {
 						case 0:
 							bulletAngle = aim.Unit()
 						case 1:
@@ -437,7 +445,7 @@ func run() {
 							1200,
 							bulletAngle,
 						)
-						bullets = append(bullets, *b)
+						game.data.bullets = append(game.data.bullets, *b)
 					} else {
 						b1Pos := pixel.V(5.0, 8.0).Rotated(aim.Angle()).Add(player.rect.Center())
 						b2Pos := pixel.V(5.0, -8.0).Rotated(aim.Angle()).Add(player.rect.Center())
@@ -453,10 +461,10 @@ func run() {
 							1200,
 							aim.Unit(),
 						)
-						bullets = append(bullets, *b1, *b2)
+						game.data.bullets = append(game.data.bullets, *b1, *b2)
 					}
-					lastBullet = time.Now()
-					bulletsFired += 1
+					game.data.lastBullet = time.Now()
+					game.data.weapon.bulletsFired += 1
 					shot := shotBuffer.Streamer(0, shotBuffer.Len())
 					volume := &effects.Volume{
 						Streamer: shot,
@@ -466,28 +474,28 @@ func run() {
 					}
 					speaker.Play(volume)
 				} else {
-					bulletsFired = 0
+					game.data.weapon.bulletsFired = 0
 				}
 			}
 
 			// move enemies
-			for i, e := range entities {
+			for i, e := range game.data.entities {
 				dir := e.rect.Center().To(player.rect.Center())
 				scaled := dir.Unit().Scaled(e.speed * dt)
 				e.rect = e.rect.Moved(scaled)
-				entities[i] = e
+				game.data.entities[i] = e
 			}
 
-			for i, b := range bullets {
+			for i, b := range game.data.bullets {
 				b.data.rect = b.data.rect.Moved(b.velocity.Scaled(dt))
-				bullets[i] = b
+				game.data.bullets[i] = b
 			}
 
 			// check for collisions
 			player.enforceWorldBoundary()
 
-			for id, a := range entities {
-				for id2, b := range entities {
+			for id, a := range game.data.entities {
+				for id2, b := range game.data.entities {
 					if id == id2 {
 						continue
 					}
@@ -499,44 +507,44 @@ func run() {
 						a.rect = a.rect.Moved(
 							b.rect.Center().To(a.rect.Center()).Unit().Scaled(intersection.Radius / 2),
 						)
-						entities[id] = a
+						game.data.entities[id] = a
 					}
 				}
 			}
 
-			for bID, b := range bullets {
+			for bID, b := range game.data.bullets {
 				if b.data.rect.W() > 0 && b.data.alive {
-					for eID, e := range entities {
+					for eID, e := range game.data.entities {
 						if e.rect.W() > 0 {
 							if b.data.rect.Intersects(e.rect) {
 								b.data.alive = false
 								e.alive = false
-								score += 50 * scoreMultiplier
-								scoreSinceBorn += 50 * scoreMultiplier
-								bullets[bID] = b
-								entities[eID] = e
+								game.data.score += 50 * game.data.scoreMultiplier
+								game.data.scoreSinceBorn += 50 * game.data.scoreMultiplier
+								game.data.bullets[bID] = b
+								game.data.entities[eID] = e
 								break
 							}
 							if !pixel.R(-worldWidth/2, -worldHeight/2, worldWidth/2, worldHeight/2).Contains(b.data.rect.Center()) {
 								b.data.alive = false
-								bullets[bID] = b
+								game.data.bullets[bID] = b
 							}
 						}
 					}
 				}
 			}
 
-			for _, e := range entities {
+			for _, e := range game.data.entities {
 				if e.alive && e.rect.W() > 0 {
 					if e.rect.Intersects(player.rect) {
-						lives -= 1
-						if lives == 0 {
-							gameState = "game_over"
+						game.data.lives -= 1
+						if game.data.lives == 0 {
+							game.state = "game_over"
 
 							gameOverTxt.Clear()
 							lines := []string{
 								"Game Over.",
-								"Score: " + fmt.Sprintf("%d", score),
+								"Score: " + fmt.Sprintf("%d", game.data.score),
 								"Press enter to restart",
 							}
 							for _, line := range lines {
@@ -552,7 +560,7 @@ func run() {
 
 			// check for bomb here for now
 			bombPressed := win.Pressed(pixelgl.KeyR) || win.JoystickAxis(currJoystick, pixelgl.AxisRightTrigger) > 0.1
-			if bombs > 0 && bombPressed && last.Sub(lastBomb).Seconds() > 3.0 {
+			if game.data.bombs > 0 && bombPressed && last.Sub(game.data.lastBomb).Seconds() > 3.0 {
 				sound := bombBuffer.Streamer(0, bombBuffer.Len())
 				volume := &effects.Volume{
 					Streamer: sound,
@@ -561,37 +569,37 @@ func run() {
 					Silent:   false,
 				}
 				speaker.Play(volume)
-				lastBomb = time.Now()
+				game.data.lastBomb = time.Now()
 
-				bombs -= 1
-				for eID, e := range entities {
+				game.data.bombs -= 1
+				for eID, e := range game.data.entities {
 					e.alive = false
-					entities[eID] = e
+					game.data.entities[eID] = e
 				}
 			}
 
 			// kill entities
 			newEntities := make([]entityData, 100)
-			for _, e := range entities {
+			for _, e := range game.data.entities {
 				if e.alive {
 					newEntities = append(newEntities, e)
 				}
 			}
-			entities = newEntities
+			game.data.entities = newEntities
 
 			// kill bullets
 			newBullets := make([]bullet, 100)
-			for _, b := range bullets {
+			for _, b := range game.data.bullets {
 				if b.data.alive || b.data.born.After(time.Now().Add(time.Duration(-10)*time.Second)) {
 					newBullets = append(newBullets, b)
 				}
 			}
-			bullets = newBullets
+			game.data.bullets = newBullets
 
 			// spawn entities
-			if last.Sub(lastSpawn).Seconds() > spawnFreq {
+			if last.Sub(game.data.lastSpawn).Seconds() > game.data.spawnFreq {
 				// spawn
-				for i := 0; i < spawnCount; i++ {
+				for i := 0; i < game.data.spawnCount; i++ {
 					pos := pixel.V(
 						float64(rand.Intn(worldWidth)-worldWidth/2),
 						float64(rand.Intn(worldHeight)-worldHeight/2),
@@ -609,72 +617,72 @@ func run() {
 						50,
 						120,
 					)
-					entities = append(entities, *enemy)
-					spawns += 1
+					game.data.entities = append(game.data.entities, *enemy)
+					game.data.spawns += 1
 				}
 
 				spawnSound := spawnBuffer.Streamer(0, spawnBuffer.Len())
 				speaker.Play(spawnSound)
-				lastSpawn = time.Now()
-				if spawns%20 == 0 {
-					spawnCount += 1
+				game.data.lastSpawn = time.Now()
+				if game.data.spawns%20 == 0 {
+					game.data.spawnCount += 1
 				}
 
-				if spawns%10 == 0 && spawnFreq > 0.5 {
-					spawnFreq -= 0.1
+				if game.data.spawns%10 == 0 && game.data.spawnFreq > 0.5 {
+					game.data.spawnFreq -= 0.1
 				}
 			}
 
-			if (waveStart == time.Time{}) && last.Sub(waveEnd).Seconds() >= waveFreq { // or the
-				// Start the next wave
-				fmt.Printf("[WaveStart] %s\n", time.Now().String())
-				waveStart = time.Now()
-			}
+			// if (waveStart == time.Time{}) && last.Sub(waveEnd).Seconds() >= waveFreq { // or the
+			// 	// Start the next wave
+			// 	fmt.Printf("[WaveStart] %s\n", time.Now().String())
+			// 	waveStart = time.Now()
+			// }
 
-			if (waveStart != time.Time{}) && last.Sub(waveStart).Seconds() >= waveDuration { // If a wave has ended
-				// End the wave
-				fmt.Printf("[WaveEnd] %s\n", time.Now().String())
-				waveEnd = time.Now()
-				waveStart = time.Time{}
-			}
+			// if (waveStart != time.Time{}) && last.Sub(waveStart).Seconds() >= waveDuration { // If a wave has ended
+			// 	// End the wave
+			// 	fmt.Printf("[WaveEnd] %s\n", time.Now().String())
+			// 	waveEnd = time.Now()
+			// 	waveStart = time.Time{}
+			// }
 
-			if last.Sub(waveStart).Seconds() < waveDuration {
-				// Continue wave
-				// TODO make these data driven
-				// waves would have spawn points, and spawn counts, and probably durations and stuff
-				// hardcoded for now :D
+			// if last.Sub(waveStart).Seconds() < waveDuration {
+			// 	// Continue wave
+			// 	// TODO make these data driven
+			// 	// waves would have spawn points, and spawn counts, and probably durations and stuff
+			// 	// hardcoded for now :D
 
-				if last.Sub(lastWaveSpawn).Seconds() > 0.2 {
+			// 	if last.Sub(lastWaveSpawn).Seconds() > 0.2 {
 
-					// 4 spawn points
-					points := [4]pixel.Vec{
-						pixel.V(-(worldWidth/2)+50, -(worldHeight/2)+50),
-						pixel.V(-(worldWidth/2)+50, (worldHeight/2)-50),
-						pixel.V((worldWidth/2)-50, -(worldHeight/2)+50),
-						pixel.V((worldWidth/2)-50, (worldHeight/2)-50),
-					}
+			// 		// 4 spawn points
+			// 		points := [4]pixel.Vec{
+			// 			pixel.V(-(worldWidth/2)+50, -(worldHeight/2)+50),
+			// 			pixel.V(-(worldWidth/2)+50, (worldHeight/2)-50),
+			// 			pixel.V((worldWidth/2)-50, -(worldHeight/2)+50),
+			// 			pixel.V((worldWidth/2)-50, (worldHeight/2)-50),
+			// 		}
 
-					for _, p := range points {
-						enemy := NewEntity(
-							p.X,
-							p.Y,
-							50,
-							130,
-						)
-						entities = append(entities, *enemy)
-						spawns += 1
-					}
-					spawnSound := spawnBuffer.Streamer(0, spawnBuffer.Len())
-					speaker.Play(spawnSound)
-					lastWaveSpawn = time.Now()
-				}
-			}
+			// 		for _, p := range points {
+			// 			enemy := NewEntity(
+			// 				p.X,
+			// 				p.Y,
+			// 				50,
+			// 				130,
+			// 			)
+			// 			entities = append(entities, *enemy)
+			// 			spawns += 1
+			// 		}
+			// 		spawnSound := spawnBuffer.Streamer(0, spawnBuffer.Len())
+			// 		speaker.Play(spawnSound)
+			// 		lastWaveSpawn = time.Now()
+			// 	}
+			// }
 
 			// adjust game rules
 
-			if score >= lifeReward {
-				lifeReward += 100000
-				lives += 1
+			if game.data.score >= game.data.lifeReward {
+				game.data.lifeReward += 100000
+				game.data.lives += 1
 				sound := lifeBuffer.Streamer(0, lifeBuffer.Len())
 				volume := &effects.Volume{
 					Streamer: sound,
@@ -685,12 +693,12 @@ func run() {
 				speaker.Play(volume)
 			}
 
-			if score >= bombReward {
-				bombReward += 100000
-				bombs += 1
+			if game.data.score >= game.data.bombReward {
+				game.data.bombReward += 100000
+				game.data.bombs += 1
 			}
 
-			if scoreSinceBorn >= multiplierReward && scoreMultiplier < 10 {
+			if game.data.scoreSinceBorn >= game.data.multiplierReward && game.data.scoreMultiplier < 10 {
 				// sound := multiplierBuffer.Streamer(0, multiplierBuffer.Len())
 				// volume := &effects.Volume{
 				// 	Streamer: sound,
@@ -699,28 +707,28 @@ func run() {
 				// 	Silent:   false,
 				// }
 				// speaker.Play(volume)
-				scoreMultiplier += 1
-				multiplierReward *= 2
+				game.data.scoreMultiplier += 1
+				game.data.multiplierReward *= 2
 			}
 
-			if score >= 10000 && fireRate > 0.1 {
-				fireRate = 0.1
+			if game.data.score >= 10000 && game.data.weapon.fireRate > 0.1 {
+				game.data.weapon.fireRate = 0.1
 			}
 
-			if score >= 20000 && fireMode != "conic" {
-				fireMode = "conic"
+			if game.data.score >= 20000 && game.data.weapon.fireMode != "conic" {
+				game.data.weapon.fireMode = "conic"
 			}
 
 		} else {
 			if win.Pressed(pixelgl.KeyEnter) || win.JoystickPressed(currJoystick, pixelgl.ButtonA) {
-				gameState = "starting"
+				game.state = "starting"
 			}
 		}
 
 		// draw
 		imd.Clear()
 
-		if gameState == "playing" {
+		if game.state == "playing" {
 			// draw player
 			imd.Color = colornames.White
 			d := imdraw.New(nil)
@@ -733,7 +741,7 @@ func run() {
 
 			// draw enemies
 			imd.Color = colornames.Lightskyblue
-			for _, e := range entities {
+			for _, e := range game.data.entities {
 				if e.alive {
 					imd.Push(e.rect.Min, e.rect.Max)
 					imd.Rectangle(2)
@@ -741,7 +749,7 @@ func run() {
 			}
 
 			bulletDraw.Color = colornames.Lightgoldenrodyellow
-			for _, b := range bullets {
+			for _, b := range game.data.bullets {
 				if b.data.alive {
 					bulletDraw.Clear()
 					bulletDraw.SetMatrix(pixel.IM.Rotated(pixel.ZV, b.data.orientation.Angle()-math.Pi/2).Moved(b.data.rect.Center()))
@@ -765,14 +773,14 @@ func run() {
 		).Moved(win.Bounds().Center()))
 		canvas.Draw(win, pixel.IM.Moved(canvas.Bounds().Center()))
 
-		if gameState == "playing" {
+		if game.state == "playing" {
 			scoreTxt.Clear()
 			txt := "Score: %d\n"
 			scoreTxt.Dot.X -= (scoreTxt.BoundsOf(txt).W() / 2)
-			fmt.Fprintf(scoreTxt, txt, score)
+			fmt.Fprintf(scoreTxt, txt, game.data.score)
 			txt = "X%d"
 			scoreTxt.Dot.X -= (scoreTxt.BoundsOf(txt).W() / 2)
-			fmt.Fprintf(scoreTxt, txt, scoreMultiplier)
+			fmt.Fprintf(scoreTxt, txt, game.data.scoreMultiplier)
 			scoreTxt.Draw(
 				win,
 				pixel.IM.Scaled(scoreTxt.Orig, 2),
@@ -781,15 +789,15 @@ func run() {
 			livesTxt.Clear()
 			txt = "Lives: %d\n"
 			livesTxt.Dot.X -= (livesTxt.BoundsOf(txt).W() / 2)
-			fmt.Fprintf(livesTxt, txt, lives)
+			fmt.Fprintf(livesTxt, txt, game.data.lives)
 			txt = "Bombs: %d"
 			livesTxt.Dot.X -= (livesTxt.BoundsOf(txt).W() / 2)
-			fmt.Fprintf(livesTxt, txt, bombs)
+			fmt.Fprintf(livesTxt, txt, game.data.bombs)
 			livesTxt.Draw(
 				win,
 				pixel.IM.Scaled(livesTxt.Orig, 2),
 			)
-		} else if gameState == "paused" {
+		} else if game.state == "paused" {
 			pausedTxt.Draw(
 				win,
 				pixel.IM.Scaled(
@@ -797,7 +805,7 @@ func run() {
 					5,
 				),
 			)
-		} else if gameState == "game_over" {
+		} else if game.state == "game_over" {
 			gameOverTxt.Draw(
 				win,
 				pixel.IM.Scaled(
