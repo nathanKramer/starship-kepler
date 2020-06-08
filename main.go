@@ -58,10 +58,10 @@ func thumbstickVector(win *pixelgl.Window, joystick pixelgl.Joystick, axisX pixe
 		x := win.JoystickAxis(pixelgl.Joystick(pixelgl.Joystick1), axisX)
 		y := win.JoystickAxis(pixelgl.Joystick(pixelgl.Joystick1), axisY) * -1
 
-		if math.Abs(x) < 0.1 {
+		if math.Abs(x) < 0.2 {
 			x = 0
 		}
-		if math.Abs(y) < 0.1 {
+		if math.Abs(y) < 0.2 {
 			y = 0
 		}
 
@@ -95,14 +95,15 @@ func (p *entityData) enforceWorldBoundary() { // this code seems dumb, TODO: fin
 
 // resist the urge to refactor. just write a game, don't worry about clean code.
 func run() {
-	monitor := pixelgl.PrimaryMonitor()
-	width, height := monitor.Size()
+	// monitor := pixelgl.PrimaryMonitor()
+	// width, height := monitor.Size()
 	cfg := pixelgl.WindowConfig{
-		Title:     "Euclidean Combat",
-		Bounds:    pixel.R(0, 0, width, height),
-		Monitor:   monitor,
-		Maximized: true,
-		VSync:     true,
+		Title: "Euclidean Combat",
+		// Bounds: pixel.R(0, 0, width, height/),
+		Bounds: pixel.R(0, 0, 1024, 768),
+		// Monitor:   monitor,
+		// Maximized: true,
+		VSync: true,
 	}
 
 	win, err := pixelgl.NewWindow(cfg)
@@ -189,6 +190,7 @@ func run() {
 	camPos := pixel.ZV
 	last := time.Now()
 	lastSpawn := time.Now()
+	lastWaveSpawn := time.Now()
 	lastBullet := time.Now()
 	lastBomb := time.Now()
 
@@ -199,9 +201,15 @@ func run() {
 	livesTxt := text.New(pixel.V(0.0, (win.Bounds().H()/2)-50), atlas)
 
 	var spawnFreq float64
+	var waveDuration float64
+	var waveFreq float64
+	var waveStart time.Time
+	var waveEnd time.Time
 	var fireRate float64
+	var fireMode string
 	var entities []entityData
 	var bullets []bullet
+	var bulletsFired int
 	var spawns int
 	var spawnCount int
 	var lives int
@@ -242,10 +250,16 @@ func run() {
 			lives = 3
 			bombs = 3
 			spawnFreq = 1.5
+			waveDuration = 5
+			waveFreq = 30
+			waveStart = time.Time{}
+			waveEnd = time.Now()
 			fireRate = 0.25
+			fireMode = "normal"
 			spawns = 0
 			entities = make([]entityData, 100)
 			bullets = make([]bullet, 100)
+			bulletsFired = 0
 			player = NewEntity(0.0, 0.0, 50, 280)
 			gameState = "playing"
 			score = 0
@@ -261,6 +275,8 @@ func run() {
 			if !player.alive {
 				entities = make([]entityData, 100)
 				bullets = make([]bullet, 100)
+				bulletsFired = 0
+				waveStart = time.Time{}
 				player = NewEntity(0.0, 0.0, 50, 280)
 				scoreMultiplier = 1
 				scoreSinceBorn = 0
@@ -293,7 +309,7 @@ func run() {
 			}
 
 			if direction.Len() > 0 {
-				player.rect = player.rect.Moved(direction.Unit().Scaled(player.speed * dt))
+				player.rect = player.rect.Moved(direction.Scaled(player.speed * dt))
 			}
 
 			aim := thumbstickVector(win, currJoystick, pixelgl.AxisRightX, pixelgl.AxisRightY)
@@ -316,14 +332,42 @@ func run() {
 
 				if aim.Len() > 0 {
 					// fmt.Printf("Bullet spawned %s", time.Now().String())
-					b := NewBullet(
-						player.rect.Center().X,
-						player.rect.Center().Y,
-						1200,
-						aim.Unit(),
-					)
+					if fireMode == "conic" {
+						rad := math.Atan2(aim.Unit().Y, aim.Unit().X)
+						ang1 := rad + (10 * (2 * math.Pi) / 360)
+						ang2 := rad - (10 * (2 * math.Pi) / 360)
+						ang1Vec := pixel.V(math.Cos(ang1), math.Sin(ang1))
+						ang2Vec := pixel.V(math.Cos(ang2), math.Sin(ang2))
+
+						var bulletAngle pixel.Vec
+						switch i := bulletsFired % 4; i {
+						case 0:
+							bulletAngle = aim.Unit()
+						case 1:
+							bulletAngle = ang1Vec
+						case 2:
+							bulletAngle = aim.Unit()
+						case 3:
+							bulletAngle = ang2Vec
+						}
+						b := NewBullet(
+							player.rect.Center().X,
+							player.rect.Center().Y,
+							1200,
+							bulletAngle,
+						)
+						bullets = append(bullets, *b)
+					} else {
+						b := NewBullet(
+							player.rect.Center().X,
+							player.rect.Center().Y,
+							1200,
+							aim.Unit(),
+						)
+						bullets = append(bullets, *b)
+					}
 					lastBullet = time.Now()
-					bullets = append(bullets, *b)
+					bulletsFired += 1
 					shot := shotBuffer.Streamer(0, shotBuffer.Len())
 					volume := &effects.Volume{
 						Streamer: shot,
@@ -332,6 +376,8 @@ func run() {
 						Silent:   false,
 					}
 					speaker.Play(volume)
+				} else {
+					bulletsFired = 0
 				}
 			}
 
@@ -419,13 +465,13 @@ func run() {
 			bombPressed := win.Pressed(pixelgl.KeyR) || win.JoystickAxis(currJoystick, pixelgl.AxisRightTrigger) > 0.1
 			if bombs > 0 && bombPressed && last.Sub(lastBomb).Seconds() > 3.0 {
 				sound := bombBuffer.Streamer(0, bombBuffer.Len())
-				// volume := &effects.Volume{
-				// 	Streamer: shot,
-				// 	Base:     10,
-				// 	Volume:   -0.7,
-				// 	Silent:   false,
-				// }
-				speaker.Play(sound)
+				volume := &effects.Volume{
+					Streamer: sound,
+					Base:     10,
+					Volume:   0.7,
+					Silent:   false,
+				}
+				speaker.Play(volume)
 				lastBomb = time.Now()
 
 				bombs -= 1
@@ -480,15 +526,55 @@ func run() {
 
 				spawnSound := spawnBuffer.Streamer(0, spawnBuffer.Len())
 				speaker.Play(spawnSound)
-				spawnStreamer.Seek(0)
 				lastSpawn = time.Now()
-				if spawns%10 == 0 {
+				if spawns%20 == 0 {
 					spawnCount += 1
 				}
 
-				if spawns%5 == 0 && spawnFreq > 0.2 {
+				if spawns%10 == 0 && spawnFreq > 0.5 {
 					spawnFreq -= 0.1
 				}
+			}
+
+			if (waveStart == time.Time{}) && last.Sub(waveEnd).Seconds() >= waveFreq { // or the
+				// Start the next wave
+				fmt.Printf("[WaveStart] %s\n", time.Now().String())
+				waveStart = time.Now()
+			}
+
+			if (waveStart != time.Time{}) && last.Sub(waveStart).Seconds() >= waveDuration { // If a wave has ended
+				// End the wave
+				fmt.Printf("[WaveEnd] %s\n", time.Now().String())
+				waveEnd = time.Now()
+				waveStart = time.Time{}
+			}
+
+			if last.Sub(waveStart).Seconds() < waveDuration && last.Sub(lastWaveSpawn).Seconds() > 0.2 {
+				// Continue wave
+				// TODO make these data driven
+				// waves would have spawn points, and spawn counts, and probably durations and stuff
+
+				// 4 spawn points
+				points := [4]pixel.Vec{
+					pixel.V(-(worldWidth/2)+50, -(worldHeight/2)+50),
+					pixel.V(-(worldWidth/2)+50, (worldHeight/2)-50),
+					pixel.V((worldWidth/2)-50, -(worldHeight/2)+50),
+					pixel.V((worldWidth/2)-50, (worldHeight/2)-50),
+				}
+
+				for _, p := range points {
+					enemy := NewEntity(
+						p.X,
+						p.Y,
+						20,
+						130,
+					)
+					entities = append(entities, *enemy)
+					spawns += 1
+				}
+				spawnSound := spawnBuffer.Streamer(0, spawnBuffer.Len())
+				speaker.Play(spawnSound)
+				lastWaveSpawn = time.Now()
 			}
 
 			// adjust game rules
@@ -497,13 +583,13 @@ func run() {
 				lifeReward += 100000
 				lives += 1
 				sound := lifeBuffer.Streamer(0, lifeBuffer.Len())
-				// volume := &effects.Volume{
-				// 	Streamer: shot,
-				// 	Base:     10,
-				// 	Volume:   -0.7,
-				// 	Silent:   false,
-				// }
-				speaker.Play(sound)
+				volume := &effects.Volume{
+					Streamer: sound,
+					Base:     10,
+					Volume:   -0.9,
+					Silent:   false,
+				}
+				speaker.Play(volume)
 			}
 
 			if score >= bombReward {
@@ -512,24 +598,24 @@ func run() {
 			}
 
 			if scoreSinceBorn >= multiplierReward && scoreMultiplier < 10 {
-				sound := multiplierBuffer.Streamer(0, multiplierBuffer.Len())
+				// sound := multiplierBuffer.Streamer(0, multiplierBuffer.Len())
 				// volume := &effects.Volume{
-				// 	Streamer: shot,
+				// 	Streamer: sound,
 				// 	Base:     10,
-				// 	Volume:   -0.7,
+				// 	Volume:   -0.9,
 				// 	Silent:   false,
 				// }
-				speaker.Play(sound)
+				// speaker.Play(volume)
 				scoreMultiplier += 1
 				multiplierReward *= 2
 			}
 
-			if score >= 10000 && fireRate > 0.05 {
+			if score >= 10000 && fireRate > 0.1 {
 				fireRate = 0.05
 			}
 
-			if score >= 20000 && fireRate > 0.02 {
-				fireRate = 0.02
+			if score >= 20000 && fireMode != "conic" {
+				fireMode = "conic"
 			}
 
 		} else {
