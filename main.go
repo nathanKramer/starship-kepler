@@ -24,11 +24,12 @@ const worldHeight = 800
 // ENTITIES
 
 type entityData struct {
-	orientation pixel.Vec
-	born        time.Time
-	rect        pixel.Rect
-	alive       bool
-	speed       float64
+	target     pixel.Vec
+	born       time.Time
+	rect       pixel.Rect
+	alive      bool
+	speed      float64
+	entityType string
 }
 
 type bullet struct {
@@ -36,20 +37,43 @@ type bullet struct {
 	velocity pixel.Vec
 }
 
-func NewEntity(x float64, y float64, size float64, speed float64) *entityData {
+func NewEntity(x float64, y float64, size float64, speed float64, entityType string) *entityData {
 	p := new(entityData)
-	p.orientation = pixel.V(0.0, 1.0)
+	p.target = pixel.V(0.0, 1.0)
 	p.rect = pixel.R(x-(size/2), y-(size/2), x+(size/2), y+(size/2))
 	p.speed = speed
 	p.alive = true
+	p.entityType = entityType
 	p.born = time.Now()
 	return p
 }
 
+func NewWanderer(x float64, y float64) *entityData {
+	w := new(entityData)
+	size := 40.0
+	w.rect = pixel.R(x-(size/2), y-(size/2), x+(size/2), y+(size/2))
+	w.speed = 40
+	w.alive = true
+	w.entityType = "wanderer"
+	w.born = time.Now()
+	return w
+}
+
+func NewPinkSquare(x float64, y float64) *entityData {
+	w := new(entityData)
+	size := 40.0
+	w.rect = pixel.R(x-(size/2), y-(size/2), x+(size/2), y+(size/2))
+	w.speed = 140
+	w.alive = true
+	w.entityType = "pink"
+	w.born = time.Now()
+	return w
+}
+
 func NewBullet(x float64, y float64, speed float64, target pixel.Vec) *bullet {
 	b := new(bullet)
-	b.data = *NewEntity(x, y, 3, speed)
-	b.data.orientation = target
+	b.data = *NewEntity(x, y, 3, speed, "bullet")
+	b.data.target = target
 	b.velocity = target.Scaled(speed)
 	return b
 }
@@ -82,16 +106,18 @@ type gamedata struct {
 	weapon          weapondata
 	waves           []wavedata
 
-	score            int
-	lifeReward       int
-	bombReward       int
-	multiplierReward int
-	waveFreq         float64
-	spawnFreq        float64
+	score             int
+	lifeReward        int
+	bombReward        int
+	multiplierReward  int
+	waveFreq          float64
+	weaponUpgradeFreq float64
+	spawnFreq         float64
 
-	lastSpawn  time.Time
-	lastBullet time.Time
-	lastBomb   time.Time
+	lastSpawn         time.Time
+	lastBullet        time.Time
+	lastBomb          time.Time
+	lastWeaponUpgrade time.Time
 }
 
 type game struct {
@@ -116,6 +142,24 @@ func NewWeaponData() *weapondata {
 	return weaponData
 }
 
+func NewBurstWeapon() *weapondata {
+	weaponData := new(weapondata)
+	weaponData.fireRate = 0.2
+	weaponData.fireMode = "burst"
+	weaponData.bulletsFired = 0
+
+	return weaponData
+}
+
+func NewConicWeapon() *weapondata {
+	weaponData := new(weapondata)
+	weaponData.fireRate = 0.05
+	weaponData.fireMode = "conic"
+	weaponData.bulletsFired = 0
+
+	return weaponData
+}
+
 func NewGameData() *gamedata {
 	gameData := new(gamedata)
 	gameData.lives = 3
@@ -123,7 +167,7 @@ func NewGameData() *gamedata {
 	gameData.scoreMultiplier = 1
 	gameData.entities = make([]entityData, 100)
 	gameData.bullets = make([]bullet, 100)
-	gameData.player = *NewEntity(0.0, 0.0, 50, 280)
+	gameData.player = *NewEntity(0.0, 0.0, 50, 280, "player")
 	gameData.spawns = 0
 	gameData.spawnCount = 1
 	gameData.scoreSinceBorn = 0
@@ -134,11 +178,13 @@ func NewGameData() *gamedata {
 	gameData.lifeReward = 100000
 	gameData.bombReward = 100000
 	gameData.waveFreq = 30
+	gameData.weaponUpgradeFreq = 30
 	gameData.spawnFreq = 1.5
 
 	gameData.lastSpawn = time.Now()
 	gameData.lastBullet = time.Now()
 	gameData.lastBomb = time.Now()
+	gameData.lastWeaponUpgrade = time.Time{}
 
 	return gameData
 }
@@ -154,8 +200,7 @@ func NewGame() *game {
 func (data *gamedata) respawnPlayer() {
 	data.entities = make([]entityData, 100)
 	data.bullets = make([]bullet, 100)
-	data.weapon = *NewWeaponData()
-	data.player = *NewEntity(0.0, 0.0, 50, 280)
+	data.player = *NewEntity(0.0, 0.0, 50, 280, "player")
 	data.scoreMultiplier = 1
 	data.scoreSinceBorn = 0
 }
@@ -184,11 +229,13 @@ func thumbstickVector(win *pixelgl.Window, joystick pixelgl.Joystick, axisX pixe
 }
 
 func drawBullet(bullet *entityData, d *imdraw.IMDraw) {
-	p1 := pixel.ZV.Add(pixel.V(0.0, 5.0))
-	p2 := p1.Add(pixel.V(5.0, -10.0))
-	p3 := p1.Add(pixel.V(-5.0, -10.0))
-	d.Push(p1, p2, pixel.ZV, p3)
-	d.Polygon(1)
+	d.Push(
+		pixel.V(1.0, 6.0),
+		pixel.V(1.0, -6.0),
+		pixel.V(-1.0, 6.0),
+		pixel.V(-1.0, -6.0),
+	)
+	d.Rectangle(3)
 }
 
 func drawShip(d *imdraw.IMDraw) {
@@ -392,12 +439,12 @@ func run() {
 			}
 
 			if direction.Len() > 0.5 {
-				orientationDt := (pixel.Lerp(
-					player.orientation,
+				targetDt := (pixel.Lerp(
+					player.target,
 					direction,
 					1-math.Pow(1.0/512, dt),
 				))
-				player.orientation = orientationDt
+				player.target = targetDt
 				player.rect = player.rect.Moved(direction.Scaled(player.speed * dt))
 			}
 
@@ -408,13 +455,13 @@ func run() {
 					scaledY := (win.MousePosition().Y - (win.Bounds().H() / 2)) * (canvas.Bounds().H() / win.Bounds().H())
 					mp := pixel.V(scaledX, scaledY).Add(camPos)
 
-					fmt.Printf(
-						"[Player] X: %f, Y: %f	[Mouse] X: %f, Y: %f\n",
-						player.rect.Center().X,
-						player.rect.Center().Y,
-						scaledX,
-						scaledY,
-					)
+					// fmt.Printf(
+					// 	"[Player] X: %f, Y: %f	[Mouse] X: %f, Y: %f\n",
+					// 	player.rect.Center().X,
+					// 	player.rect.Center().Y,
+					// 	scaledX,
+					// 	scaledY,
+					// )
 
 					aim = player.rect.Center().To(mp)
 				}
@@ -446,9 +493,29 @@ func run() {
 							bulletAngle,
 						)
 						game.data.bullets = append(game.data.bullets, *b)
+					} else if game.data.weapon.fireMode == "burst" {
+						bulletCount := 5
+						width := 40.0
+						spread := 0.20
+						for i := 0; i < bulletCount; i++ {
+							bPos := pixel.V(
+								5.0,
+								-width+(float64(i)*(width/float64(bulletCount))),
+							).Rotated(
+								aim.Angle(),
+							).Add(player.rect.Center())
+
+							b := NewBullet(
+								bPos.X,
+								bPos.Y,
+								900,
+								aim.Add(pixel.V((rand.Float64()*spread)-(spread/2), (rand.Float64()*spread)-(spread/2))).Unit(),
+							)
+							game.data.bullets = append(game.data.bullets, *b)
+						}
 					} else {
-						b1Pos := pixel.V(5.0, 8.0).Rotated(aim.Angle()).Add(player.rect.Center())
-						b2Pos := pixel.V(5.0, -8.0).Rotated(aim.Angle()).Add(player.rect.Center())
+						b1Pos := pixel.V(5.0, 5.0).Rotated(aim.Angle()).Add(player.rect.Center())
+						b2Pos := pixel.V(5.0, -5.0).Rotated(aim.Angle()).Add(player.rect.Center())
 						b1 := NewBullet(
 							b1Pos.X,
 							b1Pos.Y,
@@ -481,6 +548,15 @@ func run() {
 			// move enemies
 			for i, e := range game.data.entities {
 				dir := e.rect.Center().To(player.rect.Center())
+				if e.entityType == "wanderer" {
+					if e.target.Len() == 0 || e.rect.Center().To(e.target).Len() < 0.2 {
+						e.target = pixel.V(
+							rand.Float64()*400,
+							rand.Float64()*400,
+						).Add(e.rect.Center())
+					}
+					dir = e.rect.Center().To(e.target)
+				}
 				scaled := dir.Unit().Scaled(e.speed * dt)
 				e.rect = e.rect.Moved(scaled)
 				game.data.entities[i] = e
@@ -597,6 +673,8 @@ func run() {
 			game.data.bullets = newBullets
 
 			// spawn entities
+
+			// ambient spawns
 			if last.Sub(game.data.lastSpawn).Seconds() > game.data.spawnFreq {
 				// spawn
 				for i := 0; i < game.data.spawnCount; i++ {
@@ -604,35 +682,52 @@ func run() {
 						float64(rand.Intn(worldWidth)-worldWidth/2),
 						float64(rand.Intn(worldHeight)-worldHeight/2),
 					)
-					for pos.Sub(player.rect.Center()).Len() < 400 {
+					for pos.Sub(player.rect.Center()).Len() < 300 {
 						pos = pixel.V(
 							float64(rand.Intn(worldWidth)-worldWidth/2),
 							float64(rand.Intn(worldHeight)-worldHeight/2),
 						)
 					}
 
-					enemy := NewEntity(
-						pos.X,
-						pos.Y,
-						50,
-						120,
-					)
-					game.data.entities = append(game.data.entities, *enemy)
+					var enemy entityData
+					r := rand.Float64()
+					if r < 0.5 {
+						enemy = *NewEntity(
+							pos.X,
+							pos.Y,
+							40,
+							120,
+							"follower",
+						)
+					} else if r < 0.8 {
+						enemy = *NewWanderer(
+							pos.X,
+							pos.Y,
+						)
+					} else {
+						enemy = *NewPinkSquare(
+							pos.X,
+							pos.Y,
+						)
+					}
+
+					game.data.entities = append(game.data.entities, enemy)
 					game.data.spawns += 1
 				}
 
 				spawnSound := spawnBuffer.Streamer(0, spawnBuffer.Len())
 				speaker.Play(spawnSound)
 				game.data.lastSpawn = time.Now()
-				if game.data.spawns%20 == 0 {
+				if game.data.spawns%20 == 0 && game.data.spawnCount < 4 {
 					game.data.spawnCount += 1
 				}
 
-				if game.data.spawns%10 == 0 && game.data.spawnFreq > 0.5 {
+				if game.data.spawns%10 == 0 && game.data.spawnFreq > 0.6 {
 					game.data.spawnFreq -= 0.1
 				}
 			}
 
+			// wave management
 			// if (waveStart == time.Time{}) && last.Sub(waveEnd).Seconds() >= waveFreq { // or the
 			// 	// Start the next wave
 			// 	fmt.Printf("[WaveStart] %s\n", time.Now().String())
@@ -711,12 +806,16 @@ func run() {
 				game.data.multiplierReward *= 2
 			}
 
-			if game.data.score >= 10000 && game.data.weapon.fireRate > 0.1 {
-				game.data.weapon.fireRate = 0.1
-			}
-
-			if game.data.score >= 20000 && game.data.weapon.fireMode != "conic" {
-				game.data.weapon.fireMode = "conic"
+			timeToUpgrade := game.data.score >= 10000 && game.data.lastWeaponUpgrade == time.Time{}
+			if timeToUpgrade || (game.data.lastWeaponUpgrade != time.Time{} && last.Sub(game.data.lastWeaponUpgrade).Seconds() >= game.data.weaponUpgradeFreq) {
+				fmt.Printf("[UpgradingWeapon]")
+				game.data.lastWeaponUpgrade = time.Now()
+				switch rand.Intn(2) {
+				case 0:
+					game.data.weapon = *NewBurstWeapon()
+				case 1:
+					game.data.weapon = *NewConicWeapon()
+				}
 			}
 
 		} else {
@@ -732,7 +831,7 @@ func run() {
 			// draw player
 			imd.Color = colornames.White
 			d := imdraw.New(nil)
-			d.SetMatrix(pixel.IM.Rotated(pixel.ZV, player.orientation.Angle()-math.Pi/2).Moved(player.rect.Center()))
+			d.SetMatrix(pixel.IM.Rotated(pixel.ZV, player.target.Angle()-math.Pi/2).Moved(player.rect.Center()))
 			playerDraw.Draw(d)
 			d.Draw(imd)
 
@@ -743,8 +842,19 @@ func run() {
 			imd.Color = colornames.Lightskyblue
 			for _, e := range game.data.entities {
 				if e.alive {
-					imd.Push(e.rect.Min, e.rect.Max)
-					imd.Rectangle(2)
+					if e.entityType == "wanderer" {
+						imd.Color = colornames.Purple
+						imd.Push(e.rect.Center())
+						imd.Circle(20, 2)
+					} else if e.entityType == "follower" {
+						imd.Color = colornames.Lightskyblue
+						imd.Push(e.rect.Min, e.rect.Max)
+						imd.Rectangle(2)
+					} else if e.entityType == "pink" {
+						imd.Color = colornames.Lightpink
+						imd.Push(e.rect.Min, e.rect.Max)
+						imd.Rectangle(4)
+					}
 				}
 			}
 
@@ -752,7 +862,7 @@ func run() {
 			for _, b := range game.data.bullets {
 				if b.data.alive {
 					bulletDraw.Clear()
-					bulletDraw.SetMatrix(pixel.IM.Rotated(pixel.ZV, b.data.orientation.Angle()-math.Pi/2).Moved(b.data.rect.Center()))
+					bulletDraw.SetMatrix(pixel.IM.Rotated(pixel.ZV, b.data.target.Angle()-math.Pi/2).Moved(b.data.rect.Center()))
 					drawBullet(&b.data, bulletDraw)
 					bulletDraw.Draw(imd)
 				}
