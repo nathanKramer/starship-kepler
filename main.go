@@ -135,7 +135,7 @@ func NewWaveData() *wavedata {
 
 func NewWeaponData() *weapondata {
 	weaponData := new(weapondata)
-	weaponData.fireRate = 0.25
+	weaponData.fireRate = 0.15
 	weaponData.fireMode = "normal"
 	weaponData.bulletsFired = 0
 
@@ -153,7 +153,7 @@ func NewBurstWeapon() *weapondata {
 
 func NewConicWeapon() *weapondata {
 	weaponData := new(weapondata)
-	weaponData.fireRate = 0.05
+	weaponData.fireRate = 0.15
 	weaponData.fireMode = "conic"
 	weaponData.bulletsFired = 0
 
@@ -475,24 +475,24 @@ func run() {
 						ang1Vec := pixel.V(math.Cos(ang1), math.Sin(ang1))
 						ang2Vec := pixel.V(math.Cos(ang2), math.Sin(ang2))
 
-						var bulletAngle pixel.Vec
-						switch i := game.data.weapon.bulletsFired % 4; i {
-						case 0:
-							bulletAngle = aim.Unit()
-						case 1:
-							bulletAngle = ang1Vec
-						case 2:
-							bulletAngle = aim.Unit()
-						case 3:
-							bulletAngle = ang2Vec
-						}
+						leftB := NewBullet(
+							player.rect.Center().X,
+							player.rect.Center().Y,
+							1500, ang1Vec,
+						)
 						b := NewBullet(
 							player.rect.Center().X,
 							player.rect.Center().Y,
-							1200,
-							bulletAngle,
+							1500,
+							aim.Unit(),
 						)
-						game.data.bullets = append(game.data.bullets, *b)
+						rightB := NewBullet(
+							player.rect.Center().X,
+							player.rect.Center().Y,
+							1500,
+							ang2Vec,
+						)
+						game.data.bullets = append(game.data.bullets, *leftB, *b, *rightB)
 					} else if game.data.weapon.fireMode == "burst" {
 						bulletCount := 5
 						width := 40.0
