@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/faiface/beep"
 	"github.com/faiface/beep/effects"
 	"github.com/faiface/beep/speaker"
 	"github.com/faiface/pixel"
@@ -38,6 +39,9 @@ type entityData struct {
 	entityType string
 	text       *text.Text
 
+	// sounds
+	spawnSound *beep.Buffer
+
 	// enemy data
 	bounty     int
 	bountyText string
@@ -62,19 +66,37 @@ func NewEntity(x float64, y float64, size float64, speed float64, entityType str
 
 func NewFollower(x float64, y float64) *entityData {
 	e := NewEntity(x, y, 50.0, 120, "follower")
+	e.target = pixel.V(1.0, 1.0)
+	e.spawnSound = spawnBuffer
 	e.bounty = 50
 	return e
 }
 
 func NewWanderer(x float64, y float64) *entityData {
 	w := NewEntity(x, y, 40.0, 40, "wanderer")
+	w.spawnSound = spawnBuffer4
 	w.bounty = 25
+	return w
+}
+
+func NewDodger(x float64, y float64) *entityData {
+	w := NewEntity(x, y, 50.0, 140, "dodger")
+	w.spawnSound = spawnBuffer2
+	w.bounty = 100
 	return w
 }
 
 func NewPinkSquare(x float64, y float64) *entityData {
 	w := NewEntity(x, y, 50.0, 140, "pink")
+	w.spawnSound = spawnBuffer5
 	w.bounty = 100
+	return w
+}
+
+func NewPinkPleb(x float64, y float64) *entityData {
+	w := NewEntity(x, y, 30.0, 180, "pinkpleb")
+	// w.spawnSound = spawnBuffer4
+	w.bounty = 75
 	return w
 }
 
@@ -322,7 +344,7 @@ func run() {
 	// width, height := monitor.Size()
 	cfg := pixelgl.WindowConfig{
 		Title: "Euclidean Combat",
-		// Bounds: pixel.R(0, 0, width, height/),
+		// Bounds: pixel.R(0, 0, width, height),
 		Bounds: pixel.R(0, 0, 1024, 768),
 		// Monitor:   monitor,
 		// Maximized: true,
@@ -352,6 +374,7 @@ func run() {
 	imd := imdraw.New(nil)
 	playerDraw := imdraw.New(nil)
 	bulletDraw := imdraw.New(nil)
+	tmpTarget := imdraw.New(nil)
 	camPos := pixel.ZV
 
 	// Game initialization
@@ -369,7 +392,7 @@ func run() {
 	for i := pixelgl.Joystick1; i <= pixelgl.JoystickLast; i++ {
 		if win.JoystickPresent(i) {
 			currJoystick = i
-			fmt.Printf("Joystick Connected: %d", i)
+			fmt.Printf("Joystick Connected: %d\n", i)
 			break
 		}
 	}
@@ -558,7 +581,7 @@ func run() {
 				if !e.alive {
 					continue
 				}
-				dir := e.rect.Center().To(player.rect.Center())
+				dir := e.rect.Center().To(player.rect.Center()).Unit()
 				if e.entityType == "wanderer" {
 					if e.target.Len() == 0 || e.rect.Center().To(e.target).Len() < 0.2 {
 						e.target = pixel.V(
@@ -566,10 +589,43 @@ func run() {
 							rand.Float64()*400,
 						).Add(e.rect.Center())
 					}
-					dir = e.rect.Center().To(e.target)
+					dir = e.rect.Center().To(e.target).Unit()
+				} else if e.entityType == "dodger" {
+					// https://gamedev.stackexchange.com/questions/109513/how-to-find-if-an-object-is-facing-another-object-given-position-and-direction-a
+					// todo, tidy up and put somewhere
+					currentlyDodgingDist := -1.0
+					for _, b := range game.data.bullets {
+						if (b == bullet{}) || !b.data.alive {
+							continue
+						}
+						entToBullet := e.rect.Center().Sub(b.data.rect.Center()).Unit()
+						if entToBullet.Len() > 300 {
+							continue
+						}
+
+						facing := entToBullet.Dot(b.data.target.Unit())
+
+						isClosest := (currentlyDodgingDist == -1.0 || entToBullet.Len() < currentlyDodgingDist)
+						if facing > 0.0 && facing > 0.80 && facing < 0.95 && isClosest { // if it's basically dead on, they'll die.
+							currentlyDodgingDist = entToBullet.Len()
+
+							rad := math.Atan2(entToBullet.Unit().Y, entToBullet.Unit().X)
+							dodge1 := rad + (90 * (2 * math.Pi) / 360)
+							dodge2 := rad - (90 * (2 * math.Pi) / 360)
+							dodge1Worth := math.Abs(b.data.target.Unit().Angle() - dodge1)
+							dodge2Worth := math.Abs(b.data.target.Unit().Angle() - dodge2)
+							dodgeDirection := dodge1
+							if dodge2Worth > dodge1Worth {
+								dodgeDirection = dodge2
+							}
+							dodgeVec := pixel.V(math.Cos(dodgeDirection), math.Sin(dodgeDirection))
+							dir = dodgeVec.Scaled(3)
+						}
+					}
 				}
-				scaled := dir.Unit().Scaled(e.speed * dt)
+				scaled := dir.Scaled(e.speed * dt)
 				e.rect = e.rect.Moved(scaled)
+				e.enforceWorldBoundary()
 				game.data.entities[i] = e
 			}
 
@@ -599,23 +655,38 @@ func run() {
 				}
 			}
 
+			entsToAdd := make([]entityData, 0, 100)
 			for bID, b := range game.data.bullets {
 				if b.data.rect.W() > 0 && b.data.alive {
 					for eID, e := range game.data.entities {
-						if e.rect.W() > 0 && e.alive {
-							if b.data.rect.Intersects(e.rect) {
-								b.data.alive = false
-								e.alive = false
-								e.death = last
-								e.expiry = last.Add(time.Millisecond * 300)
-								reward := e.bounty * game.data.scoreMultiplier
-								e.bountyText = fmt.Sprintf("%d", reward)
-								game.data.score += reward
-								game.data.scoreSinceBorn += reward
-								game.data.bullets[bID] = b
-								game.data.entities[eID] = e
-								break
+						if e.rect.W() > 0 && e.alive && b.data.rect.Intersects(e.rect) {
+							b.data.alive = false
+							e.alive = false
+							e.death = last
+							e.expiry = last.Add(time.Millisecond * 300)
+							reward := e.bounty * game.data.scoreMultiplier
+							e.bountyText = fmt.Sprintf("%d", reward)
+
+							// on kill
+							if e.entityType == "pink" {
+								// spawn 3 mini plebs
+								for i := 0; i < 3; i++ {
+									pos := pixel.V(
+										rand.Float64()*100,
+										rand.Float64()*100,
+									).Add(e.rect.Center())
+									pleb := *NewPinkPleb(pos.X, pos.Y)
+									entsToAdd = append(entsToAdd, pleb)
+								}
+								// spawnSound := entsToAdd[0].spawnSound.Streamer(0, entsToAdd[0].spawnSound.Len())
+								// speaker.Play(spawnSound)
 							}
+
+							game.data.score += reward
+							game.data.scoreSinceBorn += reward
+							game.data.bullets[bID] = b
+							game.data.entities[eID] = e
+							break
 						}
 					}
 					if !pixel.R(-worldWidth/2, -worldHeight/2, worldWidth/2, worldHeight/2).Contains(b.data.rect.Center()) {
@@ -624,6 +695,8 @@ func run() {
 					}
 				}
 			}
+
+			game.data.entities = append(game.data.entities, entsToAdd...)
 
 			for _, e := range game.data.entities {
 				if e.alive && e.rect.W() > 0 && e.rect.Intersects(player.rect) {
@@ -706,29 +779,46 @@ func run() {
 
 					var enemy entityData
 					r := rand.Float64()
-					if r < 0.5 {
+					if r < 0.4 {
 						enemy = *NewFollower(
 							pos.X,
 							pos.Y,
 						)
-					} else if r < 0.8 {
+						spawnSound := enemy.spawnSound.Streamer(0, enemy.spawnSound.Len())
+						speaker.Play(spawnSound)
+					} else if r < 0.6 {
 						enemy = *NewWanderer(
 							pos.X,
 							pos.Y,
 						)
-					} else {
+						spawnSound := enemy.spawnSound.Streamer(0, enemy.spawnSound.Len())
+						speaker.Play(spawnSound)
+					} else if r < 0.8 {
 						enemy = *NewPinkSquare(
 							pos.X,
 							pos.Y,
 						)
+						spawnSound := enemy.spawnSound.Streamer(0, enemy.spawnSound.Len())
+						volume := &effects.Volume{
+							Streamer: spawnSound,
+							Base:     10,
+							Volume:   0.2,
+							Silent:   false,
+						}
+						speaker.Play(volume)
+					} else {
+						enemy = *NewDodger(
+							pos.X,
+							pos.Y,
+						)
+						spawnSound := enemy.spawnSound.Streamer(0, enemy.spawnSound.Len())
+						speaker.Play(spawnSound)
 					}
 
 					game.data.entities = append(game.data.entities, enemy)
 					game.data.spawns += 1
 				}
 
-				spawnSound := spawnBuffer.Streamer(0, spawnBuffer.Len())
-				speaker.Play(spawnSound)
 				game.data.lastSpawn = time.Now()
 				if game.data.spawns%20 == 0 && game.data.spawnCount < 4 {
 					game.data.spawnCount += 1
@@ -820,7 +910,7 @@ func run() {
 
 			timeToUpgrade := game.data.score >= 10000 && game.data.lastWeaponUpgrade == time.Time{}
 			if timeToUpgrade || (game.data.lastWeaponUpgrade != time.Time{} && last.Sub(game.data.lastWeaponUpgrade).Seconds() >= game.data.weaponUpgradeFreq) {
-				fmt.Printf("[UpgradingWeapon]")
+				fmt.Printf("[UpgradingWeapon]\n")
 				game.data.lastWeaponUpgrade = time.Now()
 				switch rand.Intn(2) {
 				case 0:
@@ -863,14 +953,22 @@ func run() {
 						imd.Color = colornames.Purple
 						imd.Push(e.rect.Center())
 						imd.Circle(20, 2)
-					} else if e.entityType == "follower" {
-						imd.Color = colornames.Lightskyblue
-						imd.Push(e.rect.Min, e.rect.Max)
-						imd.Rectangle(2)
-					} else if e.entityType == "pink" {
-						imd.Color = colornames.Lightpink
-						imd.Push(e.rect.Min, e.rect.Max)
-						imd.Rectangle(4)
+					} else {
+						tmpTarget.Clear()
+						tmpTarget.SetMatrix(pixel.IM.Rotated(e.rect.Center(), e.target.Angle()))
+						weight := 2.0
+						if e.entityType == "follower" {
+							tmpTarget.Color = colornames.Lightskyblue
+						} else if e.entityType == "pink" || e.entityType == "pinkpleb" {
+							weight = 4.0
+							tmpTarget.Color = colornames.Lightpink
+						} else if e.entityType == "dodger" {
+							weight = 4.0
+							tmpTarget.Color = colornames.Limegreen
+						}
+						tmpTarget.Push(e.rect.Min, e.rect.Max)
+						tmpTarget.Rectangle(weight)
+						tmpTarget.Draw(imd)
 					}
 				}
 			}
