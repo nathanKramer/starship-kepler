@@ -20,16 +20,27 @@ import (
 
 const worldWidth = 1200
 const worldHeight = 800
+const debug = false
+
+var basicFont *text.Atlas
 
 // ENTITIES
 
+// For now just using a god entity struct, honestly this is probably fine
 type entityData struct {
 	target     pixel.Vec
 	born       time.Time
+	death      time.Time
+	expiry     time.Time
 	rect       pixel.Rect
 	alive      bool
 	speed      float64
 	entityType string
+	text       *text.Text
+
+	// enemy data
+	bounty     int
+	bountyText string
 }
 
 type bullet struct {
@@ -45,28 +56,25 @@ func NewEntity(x float64, y float64, size float64, speed float64, entityType str
 	p.alive = true
 	p.entityType = entityType
 	p.born = time.Now()
+	p.text = text.New(pixel.V(0, 0), basicFont)
 	return p
 }
 
+func NewFollower(x float64, y float64) *entityData {
+	e := NewEntity(x, y, 50.0, 120, "follower")
+	e.bounty = 50
+	return e
+}
+
 func NewWanderer(x float64, y float64) *entityData {
-	w := new(entityData)
-	size := 40.0
-	w.rect = pixel.R(x-(size/2), y-(size/2), x+(size/2), y+(size/2))
-	w.speed = 40
-	w.alive = true
-	w.entityType = "wanderer"
-	w.born = time.Now()
+	w := NewEntity(x, y, 40.0, 40, "wanderer")
+	w.bounty = 25
 	return w
 }
 
 func NewPinkSquare(x float64, y float64) *entityData {
-	w := new(entityData)
-	size := 40.0
-	w.rect = pixel.R(x-(size/2), y-(size/2), x+(size/2), y+(size/2))
-	w.speed = 140
-	w.alive = true
-	w.entityType = "pink"
-	w.born = time.Now()
+	w := NewEntity(x, y, 50.0, 140, "pink")
+	w.bounty = 100
 	return w
 }
 
@@ -165,8 +173,8 @@ func NewGameData() *gamedata {
 	gameData.lives = 3
 	gameData.bombs = 3
 	gameData.scoreMultiplier = 1
-	gameData.entities = make([]entityData, 100)
-	gameData.bullets = make([]bullet, 100)
+	gameData.entities = make([]entityData, 0, 100)
+	gameData.bullets = make([]bullet, 0, 100)
 	gameData.player = *NewEntity(0.0, 0.0, 50, 280, "player")
 	gameData.spawns = 0
 	gameData.spawnCount = 1
@@ -239,13 +247,13 @@ func drawBullet(bullet *entityData, d *imdraw.IMDraw) {
 }
 
 func drawShip(d *imdraw.IMDraw) {
-	weight := 2.0
+	weight := 3.0
 	outline := 8.0
-	p := pixel.ZV.Add(pixel.V(0.0, -20.0))
+	p := pixel.ZV.Add(pixel.V(0.0, -15.0))
 	pInner := p.Add(pixel.V(0, outline))
-	l1 := p.Add(pixel.V(-10.0, -10.0))
+	l1 := p.Add(pixel.V(-10.0, -5.0))
 	l1Inner := l1.Add(pixel.V(0, outline))
-	r1 := p.Add(pixel.V(10.0, -10.0))
+	r1 := p.Add(pixel.V(10.0, -5.0))
 	r1Inner := r1.Add(pixel.V(0.0, outline))
 	d.Push(p, l1)
 	d.Line(weight)
@@ -256,9 +264,9 @@ func drawShip(d *imdraw.IMDraw) {
 	d.Push(pInner, r1Inner)
 	d.Line(weight)
 
-	l2 := l1.Add(pixel.V(-15, 15))
+	l2 := l1.Add(pixel.V(-15, 20))
 	l2Inner := l2.Add(pixel.V(outline, 0.0))
-	r2 := r1.Add(pixel.V(15, 15))
+	r2 := r1.Add(pixel.V(15, 20))
 	r2Inner := r2.Add(pixel.V(-outline, 0.0))
 	d.Push(l1, l2)
 	d.Line(weight)
@@ -269,8 +277,8 @@ func drawShip(d *imdraw.IMDraw) {
 	d.Push(r1Inner, r2Inner)
 	d.Line(weight)
 
-	l3 := l2.Add(pixel.V(15, 30))
-	r3 := r2.Add(pixel.V(-15, 30))
+	l3 := l2.Add(pixel.V(15, 25))
+	r3 := r2.Add(pixel.V(-15, 25))
 	d.Push(l2, l3)
 	d.Line(weight)
 	d.Push(r2, r3)
@@ -350,11 +358,11 @@ func run() {
 	last := time.Now()
 
 	// Fonts
-	atlas := text.NewAtlas(basicfont.Face7x13, text.ASCII)
-	gameOverTxt := text.New(pixel.V(0, 0), atlas)
-	pausedTxt := text.New(pixel.V(0, 0), atlas)
-	scoreTxt := text.New(pixel.V(-(win.Bounds().W()/2)+120, (win.Bounds().H()/2)-50), atlas)
-	livesTxt := text.New(pixel.V(0.0, (win.Bounds().H()/2)-50), atlas)
+	basicFont = text.NewAtlas(basicfont.Face7x13, text.ASCII)
+	gameOverTxt := text.New(pixel.V(0, 0), basicFont)
+	pausedTxt := text.New(pixel.V(0, 0), basicFont)
+	scoreTxt := text.New(pixel.V(-(win.Bounds().W()/2)+120, (win.Bounds().H()/2)-50), basicFont)
+	livesTxt := text.New(pixel.V(0.0, (win.Bounds().H()/2)-50), basicFont)
 
 	// Input initialization
 	currJoystick := pixelgl.Joystick1
@@ -499,7 +507,7 @@ func run() {
 						spread := 0.20
 						for i := 0; i < bulletCount; i++ {
 							bPos := pixel.V(
-								5.0,
+								25.0,
 								-width+(float64(i)*(width/float64(bulletCount))),
 							).Rotated(
 								aim.Angle(),
@@ -547,6 +555,9 @@ func run() {
 
 			// move enemies
 			for i, e := range game.data.entities {
+				if !e.alive {
+					continue
+				}
 				dir := e.rect.Center().To(player.rect.Center())
 				if e.entityType == "wanderer" {
 					if e.target.Len() == 0 || e.rect.Center().To(e.target).Len() < 0.2 {
@@ -591,45 +602,47 @@ func run() {
 			for bID, b := range game.data.bullets {
 				if b.data.rect.W() > 0 && b.data.alive {
 					for eID, e := range game.data.entities {
-						if e.rect.W() > 0 {
+						if e.rect.W() > 0 && e.alive {
 							if b.data.rect.Intersects(e.rect) {
 								b.data.alive = false
 								e.alive = false
-								game.data.score += 50 * game.data.scoreMultiplier
-								game.data.scoreSinceBorn += 50 * game.data.scoreMultiplier
+								e.death = last
+								e.expiry = last.Add(time.Millisecond * 300)
+								reward := e.bounty * game.data.scoreMultiplier
+								e.bountyText = fmt.Sprintf("%d", reward)
+								game.data.score += reward
+								game.data.scoreSinceBorn += reward
 								game.data.bullets[bID] = b
 								game.data.entities[eID] = e
 								break
 							}
-							if !pixel.R(-worldWidth/2, -worldHeight/2, worldWidth/2, worldHeight/2).Contains(b.data.rect.Center()) {
-								b.data.alive = false
-								game.data.bullets[bID] = b
-							}
 						}
+					}
+					if !pixel.R(-worldWidth/2, -worldHeight/2, worldWidth/2, worldHeight/2).Contains(b.data.rect.Center()) {
+						b.data.alive = false
+						game.data.bullets[bID] = b
 					}
 				}
 			}
 
 			for _, e := range game.data.entities {
-				if e.alive && e.rect.W() > 0 {
-					if e.rect.Intersects(player.rect) {
-						game.data.lives -= 1
-						if game.data.lives == 0 {
-							game.state = "game_over"
+				if e.alive && e.rect.W() > 0 && e.rect.Intersects(player.rect) {
+					game.data.lives -= 1
+					if game.data.lives == 0 {
+						game.state = "game_over"
 
-							gameOverTxt.Clear()
-							lines := []string{
-								"Game Over.",
-								"Score: " + fmt.Sprintf("%d", game.data.score),
-								"Press enter to restart",
-							}
-							for _, line := range lines {
-								gameOverTxt.Dot.X -= (gameOverTxt.BoundsOf(line).W() / 2)
-								fmt.Fprintln(gameOverTxt, line)
-							}
-						} else {
-							player.alive = false
+						gameOverTxt.Clear()
+						lines := []string{
+							"Game Over.",
+							"Score: " + fmt.Sprintf("%d", game.data.score),
+							"Press enter to restart",
 						}
+						for _, line := range lines {
+							gameOverTxt.Dot.X -= (gameOverTxt.BoundsOf(line).W() / 2)
+							fmt.Fprintln(gameOverTxt, line)
+						}
+					} else {
+						player.alive = false
 					}
 				}
 			}
@@ -650,14 +663,16 @@ func run() {
 				game.data.bombs -= 1
 				for eID, e := range game.data.entities {
 					e.alive = false
+					e.death = last
+					e.expiry = last
 					game.data.entities[eID] = e
 				}
 			}
 
 			// kill entities
-			newEntities := make([]entityData, 100)
+			newEntities := make([]entityData, 0, 100)
 			for _, e := range game.data.entities {
-				if e.alive {
+				if e.alive || (e.expiry != time.Time{} && last.Before(e.expiry)) {
 					newEntities = append(newEntities, e)
 				}
 			}
@@ -692,12 +707,9 @@ func run() {
 					var enemy entityData
 					r := rand.Float64()
 					if r < 0.5 {
-						enemy = *NewEntity(
+						enemy = *NewFollower(
 							pos.X,
 							pos.Y,
-							40,
-							120,
-							"follower",
 						)
 					} else if r < 0.8 {
 						enemy = *NewWanderer(
@@ -794,14 +806,14 @@ func run() {
 			}
 
 			if game.data.scoreSinceBorn >= game.data.multiplierReward && game.data.scoreMultiplier < 10 {
-				// sound := multiplierBuffer.Streamer(0, multiplierBuffer.Len())
-				// volume := &effects.Volume{
-				// 	Streamer: sound,
-				// 	Base:     10,
-				// 	Volume:   -0.9,
-				// 	Silent:   false,
-				// }
-				// speaker.Play(volume)
+				sound := multiplierBuffer.Streamer(0, multiplierBuffer.Len())
+				volume := &effects.Volume{
+					Streamer: sound,
+					Base:     10,
+					Volume:   -0.9,
+					Silent:   false,
+				}
+				speaker.Play(volume)
 				game.data.scoreMultiplier += 1
 				game.data.multiplierReward *= 2
 			}
@@ -831,6 +843,11 @@ func run() {
 			// draw player
 			imd.Color = colornames.White
 			d := imdraw.New(nil)
+			if debug {
+				d.Color = colornames.Lightgreen
+				d.Push(player.rect.Min, player.rect.Max)
+				d.Rectangle(2)
+			}
 			d.SetMatrix(pixel.IM.Rotated(pixel.ZV, player.target.Angle()-math.Pi/2).Moved(player.rect.Center()))
 			playerDraw.Draw(d)
 			d.Draw(imd)
@@ -872,6 +889,29 @@ func run() {
 		canvas.Clear(colornames.Black)
 		mapRect.Draw(canvas)
 		imd.Draw(canvas)
+
+		if game.state == "playing" {
+			for _, e := range game.data.entities {
+				if (!e.alive && e.death != time.Time{}) {
+					// fmt.Print("[DrawBounty]")
+					// Draw the bounty
+					e.text.Clear()
+					e.text.Orig = e.rect.Center()
+					e.text.Dot = e.rect.Center()
+
+					text := fmt.Sprintf("%d", e.bounty*game.data.scoreMultiplier)
+					e.text.Dot.X -= (e.text.BoundsOf(text).W() / 2)
+					fmt.Fprintf(e.text, "%s", text)
+					e.text.Color = colornames.White
+
+					growth := (0.5 - (float64(e.expiry.Sub(last).Milliseconds()) / 300.0))
+					e.text.Draw(
+						canvas,
+						pixel.IM.Scaled(e.text.Orig, 2.0+growth),
+					)
+				}
+			}
+		}
 
 		// stretch the canvas to the window
 		win.Clear(colornames.White)
