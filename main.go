@@ -30,10 +30,11 @@ var basicFont *text.Atlas
 // For now just using a god entity struct, honestly this is probably fine
 type entityData struct {
 	target     pixel.Vec
+	origin     pixel.Vec
+	radius     float64
 	born       time.Time
 	death      time.Time
 	expiry     time.Time
-	rect       pixel.Rect
 	alive      bool
 	speed      float64
 	entityType string
@@ -55,7 +56,8 @@ type bullet struct {
 func NewEntity(x float64, y float64, size float64, speed float64, entityType string) *entityData {
 	p := new(entityData)
 	p.target = pixel.V(0.0, 1.0)
-	p.rect = pixel.R(x-(size/2), y-(size/2), x+(size/2), y+(size/2))
+	p.origin = pixel.V(x, y)
+	p.radius = size / 2.0
 	p.speed = speed
 	p.alive = true
 	p.entityType = entityType
@@ -313,26 +315,24 @@ func drawShip(d *imdraw.IMDraw) {
 	d.Line(weight)
 }
 
+func (e *entityData) Circle() pixel.Circle {
+	return pixel.C(e.origin, e.radius)
+}
+
 func (p *entityData) enforceWorldBoundary() { // this code seems dumb, TODO: find some api call that does it
-	w := p.rect.W()
-	h := p.rect.H()
-	minX := -(worldWidth / 2.0)
-	minY := -(worldHeight / 2.0)
-	maxX := (worldWidth / 2.)
-	maxY := (worldHeight / 2.0)
-	if p.rect.Min.X < minX {
-		p.rect.Min.X = minX
-		p.rect.Max.X = minX + w
-	} else if p.rect.Max.X > maxX {
-		p.rect.Min.X = maxX - w
-		p.rect.Max.X = maxX
+	minX := -(worldWidth / 2.0) + p.radius
+	minY := -(worldHeight / 2.0) + p.radius
+	maxX := (worldWidth / 2.) - p.radius
+	maxY := (worldHeight / 2.0) - p.radius
+	if p.origin.X < minX {
+		p.origin.X = minX
+	} else if p.origin.X > maxX {
+		p.origin.X = maxX
 	}
-	if p.rect.Min.Y < minY {
-		p.rect.Min.Y = minY
-		p.rect.Max.Y = minY + h
-	} else if p.rect.Max.Y > maxY {
-		p.rect.Max.Y = maxY
-		p.rect.Min.Y = maxY - h
+	if p.origin.Y < minY {
+		p.origin.Y = minY
+	} else if p.origin.Y > maxY {
+		p.origin.Y = maxY
 	}
 }
 
@@ -365,6 +365,7 @@ func run() {
 	}
 
 	// bgColor := color.RGBA{0x16, 0x16, 0x16, 0xff}
+	// Draw targets
 
 	mapRect := imdraw.New(nil)
 	mapRect.Color = color.RGBA{0x64, 0x64, 0xff, 0xbb}
@@ -421,7 +422,7 @@ func run() {
 		// lerp the camera position towards the player
 		camPos = pixel.Lerp(
 			camPos,
-			player.rect.Center(),
+			player.origin,
 			1-math.Pow(1.0/128, dt),
 		)
 		cam := pixel.IM.Moved(camPos.Scaled(-1))
@@ -484,7 +485,7 @@ func run() {
 					1-math.Pow(1.0/512, dt),
 				))
 				player.target = targetDt
-				player.rect = player.rect.Moved(direction.Scaled(player.speed * dt))
+				player.origin = player.origin.Add(direction.Scaled(player.speed * dt))
 			}
 
 			aim := thumbstickVector(win, currJoystick, pixelgl.AxisRightX, pixelgl.AxisRightY)
@@ -499,16 +500,7 @@ func run() {
 					scaledX := (win.MousePosition().X - (win.Bounds().W() / 2)) * (canvas.Bounds().W() / win.Bounds().W())
 					scaledY := (win.MousePosition().Y - (win.Bounds().H() / 2)) * (canvas.Bounds().H() / win.Bounds().H())
 					mp := pixel.V(scaledX, scaledY).Add(camPos)
-
-					// fmt.Printf(
-					// 	"[Player] X: %f, Y: %f	[Mouse] X: %f, Y: %f\n",
-					// 	player.rect.Center().X,
-					// 	player.rect.Center().Y,
-					// 	scaledX,
-					// 	scaledY,
-					// )
-
-					aim = player.rect.Center().To(mp)
+					aim = player.origin.To(mp)
 				}
 
 				if aim.Len() > 0 {
@@ -521,19 +513,19 @@ func run() {
 						ang2Vec := pixel.V(math.Cos(ang2), math.Sin(ang2))
 
 						leftB := NewBullet(
-							player.rect.Center().X,
-							player.rect.Center().Y,
+							player.origin.X,
+							player.origin.Y,
 							1500, ang1Vec,
 						)
 						b := NewBullet(
-							player.rect.Center().X,
-							player.rect.Center().Y,
+							player.origin.X,
+							player.origin.Y,
 							1500,
 							aim.Unit(),
 						)
 						rightB := NewBullet(
-							player.rect.Center().X,
-							player.rect.Center().Y,
+							player.origin.X,
+							player.origin.Y,
 							1500,
 							ang2Vec,
 						)
@@ -547,7 +539,7 @@ func run() {
 								-(width/2)+(float64(i)*(width/float64(bulletCount))),
 							).Rotated(
 								aim.Angle(),
-							).Add(player.rect.Center())
+							).Add(player.origin)
 
 							b := NewBullet(
 								bPos.X,
@@ -558,8 +550,8 @@ func run() {
 							game.data.bullets = append(game.data.bullets, *b)
 						}
 					} else {
-						b1Pos := pixel.V(5.0, 5.0).Rotated(aim.Angle()).Add(player.rect.Center())
-						b2Pos := pixel.V(5.0, -5.0).Rotated(aim.Angle()).Add(player.rect.Center())
+						b1Pos := pixel.V(5.0, 5.0).Rotated(aim.Angle()).Add(player.origin)
+						b2Pos := pixel.V(5.0, -5.0).Rotated(aim.Angle()).Add(player.origin)
 						b1 := NewBullet(
 							b1Pos.X,
 							b1Pos.Y,
@@ -596,15 +588,15 @@ func run() {
 				if !e.alive {
 					continue
 				}
-				dir := e.rect.Center().To(player.rect.Center()).Unit()
+				dir := e.origin.To(player.origin).Unit()
 				if e.entityType == "wanderer" {
-					if e.target.Len() == 0 || e.rect.Center().To(e.target).Len() < 0.2 {
+					if e.target.Len() == 0 || e.origin.To(e.target).Len() < 0.2 {
 						e.target = pixel.V(
 							rand.Float64()*400,
 							rand.Float64()*400,
-						).Add(e.rect.Center())
+						).Add(e.origin)
 					}
-					dir = e.rect.Center().To(e.target).Unit()
+					dir = e.origin.To(e.target).Unit()
 				} else if e.entityType == "dodger" {
 					// https://gamedev.stackexchange.com/questions/109513/how-to-find-if-an-object-is-facing-another-object-given-position-and-direction-a
 					// todo, tidy up and put somewhere
@@ -613,7 +605,7 @@ func run() {
 						if (b == bullet{}) || !b.data.alive {
 							continue
 						}
-						entToBullet := e.rect.Center().Sub(b.data.rect.Center()).Unit()
+						entToBullet := e.origin.Sub(b.data.origin).Unit()
 						if entToBullet.Len() > 500 {
 							continue
 						}
@@ -639,13 +631,13 @@ func run() {
 					}
 				}
 				scaled := dir.Scaled(e.speed * dt)
-				e.rect = e.rect.Moved(scaled)
+				e.origin = e.origin.Add(scaled)
 				e.enforceWorldBoundary()
 				game.data.entities[i] = e
 			}
 
 			for i, b := range game.data.bullets {
-				b.data.rect = b.data.rect.Moved(b.velocity.Scaled(dt))
+				b.data.origin = b.data.origin.Add(b.velocity.Scaled(dt))
 				game.data.bullets[i] = b
 			}
 
@@ -658,12 +650,12 @@ func run() {
 						continue
 					}
 
-					aCircle := pixel.C(a.rect.Center(), a.rect.W()/2)
-					bCircle := pixel.C(b.rect.Center(), b.rect.W()/2)
+					aCircle := pixel.C(a.origin, a.radius)
+					bCircle := pixel.C(b.origin, b.radius)
 					intersection := aCircle.Intersect(bCircle)
 					if intersection.Radius > 0 {
-						a.rect = a.rect.Moved(
-							b.rect.Center().To(a.rect.Center()).Unit().Scaled(intersection.Radius / 2),
+						a.origin = a.origin.Add(
+							b.origin.To(a.origin).Unit().Scaled(intersection.Radius),
 						)
 						game.data.entities[id] = a
 					}
@@ -672,9 +664,9 @@ func run() {
 
 			entsToAdd := make([]entityData, 0, 100)
 			for bID, b := range game.data.bullets {
-				if b.data.rect.W() > 0 && b.data.alive {
+				if b.data.alive {
 					for eID, e := range game.data.entities {
-						if e.rect.W() > 0 && e.alive && b.data.rect.Intersects(e.rect) {
+						if e.alive && b.data.Circle().Intersect(e.Circle()).Radius > 0 {
 							b.data.alive = false
 							e.alive = false
 							e.death = last
@@ -689,7 +681,7 @@ func run() {
 									pos := pixel.V(
 										rand.Float64()*100,
 										rand.Float64()*100,
-									).Add(e.rect.Center())
+									).Add(e.origin)
 									pleb := *NewPinkPleb(pos.X, pos.Y)
 									entsToAdd = append(entsToAdd, pleb)
 								}
@@ -704,7 +696,7 @@ func run() {
 							break
 						}
 					}
-					if !pixel.R(-worldWidth/2, -worldHeight/2, worldWidth/2, worldHeight/2).Contains(b.data.rect.Center()) {
+					if !pixel.R(-worldWidth/2, -worldHeight/2, worldWidth/2, worldHeight/2).Contains(b.data.origin) {
 						b.data.alive = false
 						game.data.bullets[bID] = b
 					}
@@ -714,7 +706,7 @@ func run() {
 			game.data.entities = append(game.data.entities, entsToAdd...)
 
 			for _, e := range game.data.entities {
-				if e.alive && e.rect.W() > 0 && e.rect.Intersects(player.rect) {
+				if e.alive && e.Circle().Intersect(player.Circle()).Radius > 0 {
 					game.data.lives -= 1
 					if game.data.lives == 0 {
 						game.state = "game_over"
@@ -786,7 +778,7 @@ func run() {
 						float64(rand.Intn(worldWidth)-worldWidth/2),
 						float64(rand.Intn(worldHeight)-worldHeight/2),
 					)
-					for pos.Sub(player.rect.Center()).Len() < 300 {
+					for pos.Sub(player.origin).Len() < 300 {
 						pos = pixel.V(
 							float64(rand.Intn(worldWidth)-worldWidth/2),
 							float64(rand.Intn(worldHeight)-worldHeight/2),
@@ -976,10 +968,10 @@ func run() {
 			d := imdraw.New(nil)
 			if debug {
 				d.Color = colornames.Lightgreen
-				d.Push(player.rect.Min, player.rect.Max)
-				d.Rectangle(2)
+				d.Push(player.origin)
+				d.Circle(player.radius, 2)
 			}
-			d.SetMatrix(pixel.IM.Rotated(pixel.ZV, player.target.Angle()-math.Pi/2).Moved(player.rect.Center()))
+			d.SetMatrix(pixel.IM.Rotated(pixel.ZV, player.target.Angle()-math.Pi/2).Moved(player.origin))
 			playerDraw.Draw(d)
 			d.Draw(imd)
 
@@ -992,15 +984,15 @@ func run() {
 				if e.alive {
 					if e.entityType == "wanderer" {
 						imd.Color = colornames.Purple
-						imd.Push(e.rect.Center())
+						imd.Push(e.origin)
 						imd.Circle(20, 2)
 					} else if e.entityType == "blackhole" {
 						imd.Color = colornames.Red
-						imd.Push(e.rect.Center())
+						imd.Push(e.origin)
 						imd.Circle(37, 2)
 					} else {
 						tmpTarget.Clear()
-						tmpTarget.SetMatrix(pixel.IM.Rotated(e.rect.Center(), e.target.Angle()))
+						tmpTarget.SetMatrix(pixel.IM.Rotated(e.origin, e.target.Angle()))
 						weight := 2.0
 						if e.entityType == "follower" {
 							tmpTarget.Color = colornames.Lightskyblue
@@ -1011,9 +1003,15 @@ func run() {
 							weight = 4.0
 							tmpTarget.Color = colornames.Limegreen
 						}
-						tmpTarget.Push(e.rect.Min, e.rect.Max)
+						tmpTarget.Push(pixel.V(e.origin.X-e.radius, e.origin.Y-e.radius), pixel.V(e.origin.X+e.radius, e.origin.Y+e.radius))
 						tmpTarget.Rectangle(weight)
 						tmpTarget.Draw(imd)
+					}
+
+					if debug {
+						imd.Color = colornames.Green
+						imd.Push(e.origin)
+						imd.Circle(e.radius, 2)
 					}
 				}
 			}
@@ -1022,7 +1020,7 @@ func run() {
 			for _, b := range game.data.bullets {
 				if b.data.alive {
 					bulletDraw.Clear()
-					bulletDraw.SetMatrix(pixel.IM.Rotated(pixel.ZV, b.data.target.Angle()-math.Pi/2).Moved(b.data.rect.Center()))
+					bulletDraw.SetMatrix(pixel.IM.Rotated(pixel.ZV, b.data.target.Angle()-math.Pi/2).Moved(b.data.origin))
 					drawBullet(&b.data, bulletDraw)
 					bulletDraw.Draw(imd)
 				}
@@ -1039,8 +1037,8 @@ func run() {
 					// fmt.Print("[DrawBounty]")
 					// Draw the bounty
 					e.text.Clear()
-					e.text.Orig = e.rect.Center()
-					e.text.Dot = e.rect.Center()
+					e.text.Orig = e.origin
+					e.text.Dot = e.origin
 
 					text := fmt.Sprintf("%d", e.bounty*game.data.scoreMultiplier)
 					e.text.Dot.X -= (e.text.BoundsOf(text).W() / 2)
