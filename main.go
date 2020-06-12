@@ -100,6 +100,12 @@ func NewPinkPleb(x float64, y float64) *entityData {
 	return w
 }
 
+func NewBlackHole(x float64, y float64) *entityData {
+	b := NewEntity(x, y, 75.0, 0.0, "blackhole")
+	b.bounty = 150
+	return b
+}
+
 func NewBullet(x float64, y float64, speed float64, target pixel.Vec) *bullet {
 	b := new(bullet)
 	b.data = *NewEntity(x, y, 3, speed, "bullet")
@@ -118,9 +124,8 @@ type wavedata struct {
 }
 
 type weapondata struct {
-	fireRate     float64
-	fireMode     string
-	bulletsFired int
+	fireRate float64
+	fireMode string
 }
 
 type gamedata struct {
@@ -167,25 +172,22 @@ func NewWeaponData() *weapondata {
 	weaponData := new(weapondata)
 	weaponData.fireRate = 0.15
 	weaponData.fireMode = "normal"
-	weaponData.bulletsFired = 0
 
 	return weaponData
 }
 
 func NewBurstWeapon() *weapondata {
 	weaponData := new(weapondata)
-	weaponData.fireRate = 0.2
+	weaponData.fireRate = 0.18
 	weaponData.fireMode = "burst"
-	weaponData.bulletsFired = 0
 
 	return weaponData
 }
 
 func NewConicWeapon() *weapondata {
 	weaponData := new(weapondata)
-	weaponData.fireRate = 0.15
+	weaponData.fireRate = 0.1
 	weaponData.fireMode = "conic"
-	weaponData.bulletsFired = 0
 
 	return weaponData
 }
@@ -197,14 +199,14 @@ func NewGameData() *gamedata {
 	gameData.scoreMultiplier = 1
 	gameData.entities = make([]entityData, 0, 100)
 	gameData.bullets = make([]bullet, 0, 100)
-	gameData.player = *NewEntity(0.0, 0.0, 50, 280, "player")
+	gameData.player = *NewEntity(0.0, 0.0, 50, 320, "player")
 	gameData.spawns = 0
 	gameData.spawnCount = 1
 	gameData.scoreSinceBorn = 0
 	gameData.weapon = *NewWeaponData()
 
 	gameData.score = 0
-	gameData.multiplierReward = 500
+	gameData.multiplierReward = 2000
 	gameData.lifeReward = 100000
 	gameData.bombReward = 100000
 	gameData.waveFreq = 30
@@ -237,7 +239,7 @@ func (data *gamedata) respawnPlayer() {
 
 func (game *game) respawnPlayer() {
 	game.data.respawnPlayer()
-	game.data.multiplierReward = 500
+	game.data.multiplierReward = 2000
 }
 
 func thumbstickVector(win *pixelgl.Window, joystick pixelgl.Joystick, axisX pixelgl.GamepadAxis, axisY pixelgl.GamepadAxis) pixel.Vec {
@@ -340,15 +342,21 @@ func init() {
 
 // resist the urge to refactor. just write a game, don't worry about clean code.
 func run() {
-	// monitor := pixelgl.PrimaryMonitor()
-	// width, height := monitor.Size()
+	monitor := pixelgl.PrimaryMonitor()
+	width, height := monitor.Size()
 	cfg := pixelgl.WindowConfig{
-		Title: "Euclidean Combat",
-		// Bounds: pixel.R(0, 0, width, height),
-		Bounds: pixel.R(0, 0, 1024, 768),
-		// Monitor:   monitor,
-		// Maximized: true,
-		VSync: true,
+		Title:  "Euclidean Combat",
+		Bounds: pixel.R(0, 0, width, height),
+		// Bounds: pixel.R(0, 0, 1024, 768),
+		Monitor:   monitor,
+		Maximized: true,
+		VSync:     true,
+	}
+
+	if debug {
+		cfg.Bounds = pixel.R(0, 0, 1024, 768)
+		cfg.Maximized = false
+		cfg.Monitor = nil
 	}
 
 	win, err := pixelgl.NewWindow(cfg)
@@ -480,7 +488,13 @@ func run() {
 			}
 
 			aim := thumbstickVector(win, currJoystick, pixelgl.AxisRightX, pixelgl.AxisRightY)
-			if last.Sub(game.data.lastBullet).Seconds() > game.data.weapon.fireRate {
+			// if !win.Pressed(pixelgl.KeySpace) && aim.Len() == 0 {
+
+			// }
+			timeSinceBullet := last.Sub(game.data.lastBullet).Seconds()
+			timeSinceAbleToShoot := timeSinceBullet - game.data.weapon.fireRate
+
+			if timeSinceAbleToShoot >= 0 {
 				if win.Pressed(pixelgl.KeySpace) {
 					scaledX := (win.MousePosition().X - (win.Bounds().W() / 2)) * (canvas.Bounds().W() / win.Bounds().W())
 					scaledY := (win.MousePosition().Y - (win.Bounds().H() / 2)) * (canvas.Bounds().H() / win.Bounds().H())
@@ -527,11 +541,10 @@ func run() {
 					} else if game.data.weapon.fireMode == "burst" {
 						bulletCount := 5
 						width := 40.0
-						spread := 0.20
 						for i := 0; i < bulletCount; i++ {
 							bPos := pixel.V(
 								25.0,
-								-width+(float64(i)*(width/float64(bulletCount))),
+								-(width/2)+(float64(i)*(width/float64(bulletCount))),
 							).Rotated(
 								aim.Angle(),
 							).Add(player.rect.Center())
@@ -540,7 +553,7 @@ func run() {
 								bPos.X,
 								bPos.Y,
 								900,
-								aim.Add(pixel.V((rand.Float64()*spread)-(spread/2), (rand.Float64()*spread)-(spread/2))).Unit(),
+								aim.Unit(),
 							)
 							game.data.bullets = append(game.data.bullets, *b)
 						}
@@ -561,18 +574,20 @@ func run() {
 						)
 						game.data.bullets = append(game.data.bullets, *b1, *b2)
 					}
-					game.data.lastBullet = time.Now()
-					game.data.weapon.bulletsFired += 1
+
+					overflow := timeSinceAbleToShoot * 1000
+					if overflow > game.data.weapon.fireRate {
+						overflow = 0
+					}
+					game.data.lastBullet = last
 					shot := shotBuffer.Streamer(0, shotBuffer.Len())
 					volume := &effects.Volume{
 						Streamer: shot,
 						Base:     10,
-						Volume:   -0.7,
+						Volume:   -1.2,
 						Silent:   false,
 					}
 					speaker.Play(volume)
-				} else {
-					game.data.weapon.bulletsFired = 0
 				}
 			}
 
@@ -599,7 +614,7 @@ func run() {
 							continue
 						}
 						entToBullet := e.rect.Center().Sub(b.data.rect.Center()).Unit()
-						if entToBullet.Len() > 300 {
+						if entToBullet.Len() > 500 {
 							continue
 						}
 
@@ -765,6 +780,7 @@ func run() {
 			// ambient spawns
 			if last.Sub(game.data.lastSpawn).Seconds() > game.data.spawnFreq {
 				// spawn
+				spawns := make([]entityData, 0, game.data.spawnCount)
 				for i := 0; i < game.data.spawnCount; i++ {
 					pos := pixel.V(
 						float64(rand.Intn(worldWidth)-worldWidth/2),
@@ -784,41 +800,65 @@ func run() {
 							pos.X,
 							pos.Y,
 						)
-						spawnSound := enemy.spawnSound.Streamer(0, enemy.spawnSound.Len())
-						speaker.Play(spawnSound)
+						// spawnSound := enemy.spawnSound.Streamer(0, enemy.spawnSound.Len())
+						// speaker.Play(spawnSound)
 					} else if r < 0.6 {
 						enemy = *NewWanderer(
 							pos.X,
 							pos.Y,
 						)
-						spawnSound := enemy.spawnSound.Streamer(0, enemy.spawnSound.Len())
-						speaker.Play(spawnSound)
-					} else if r < 0.8 {
+						// spawnSound := enemy.spawnSound.Streamer(0, enemy.spawnSound.Len())
+						// speaker.Play(spawnSound)
+					} else if r < 0.9 {
 						enemy = *NewPinkSquare(
 							pos.X,
 							pos.Y,
 						)
-						spawnSound := enemy.spawnSound.Streamer(0, enemy.spawnSound.Len())
-						volume := &effects.Volume{
-							Streamer: spawnSound,
-							Base:     10,
-							Volume:   0.2,
-							Silent:   false,
-						}
-						speaker.Play(volume)
-					} else {
+						// spawnSound := enemy.spawnSound.Streamer(0, enemy.spawnSound.Len())
+						// volume := &effects.Volume{
+						// 	Streamer: spawnSound,
+						// 	Base:     10,
+						// 	Volume:   0.2,
+						// 	Silent:   false,
+						// }
+						// speaker.Play(volume)
+					} else if r < 0.95 {
 						enemy = *NewDodger(
 							pos.X,
 							pos.Y,
 						)
-						spawnSound := enemy.spawnSound.Streamer(0, enemy.spawnSound.Len())
-						speaker.Play(spawnSound)
+						// spawnSound := enemy.spawnSound.Streamer(0, enemy.spawnSound.Len())
+						// speaker.Play(spawnSound)
+					} else {
+						enemy = *NewBlackHole(
+							pos.X,
+							pos.Y,
+						)
+						// spawnSound := enemy.spawnSound.Streamer(0, enemy.spawnSound.Len())
+						// speaker.Play(spawnSound)
 					}
 
-					game.data.entities = append(game.data.entities, enemy)
-					game.data.spawns += 1
+					spawns = append(spawns, enemy)
 				}
 
+				playback := map[string]bool{}
+				for _, e := range spawns {
+					if playback[e.entityType] || e.spawnSound == nil {
+						continue
+					}
+					playback[e.entityType] = true
+
+					spawnSound := e.spawnSound.Streamer(0, e.spawnSound.Len())
+					volume := &effects.Volume{
+						Streamer: spawnSound,
+						Base:     10,
+						Volume:   -0.6,
+						Silent:   false,
+					}
+					speaker.Play(volume)
+				}
+				game.data.entities = append(game.data.entities, spawns...)
+				game.data.spawns += 1
 				game.data.lastSpawn = time.Now()
 				if game.data.spawns%20 == 0 && game.data.spawnCount < 4 {
 					game.data.spawnCount += 1
@@ -896,16 +936,17 @@ func run() {
 			}
 
 			if game.data.scoreSinceBorn >= game.data.multiplierReward && game.data.scoreMultiplier < 10 {
-				sound := multiplierBuffer.Streamer(0, multiplierBuffer.Len())
+				game.data.scoreMultiplier += 1
+				game.data.multiplierReward *= 2
+				buffer := multiplierSounds[game.data.scoreMultiplier]
+				sound := buffer.Streamer(0, buffer.Len())
 				volume := &effects.Volume{
 					Streamer: sound,
 					Base:     10,
-					Volume:   -0.9,
+					Volume:   -0.6,
 					Silent:   false,
 				}
 				speaker.Play(volume)
-				game.data.scoreMultiplier += 1
-				game.data.multiplierReward *= 2
 			}
 
 			timeToUpgrade := game.data.score >= 10000 && game.data.lastWeaponUpgrade == time.Time{}
@@ -953,6 +994,10 @@ func run() {
 						imd.Color = colornames.Purple
 						imd.Push(e.rect.Center())
 						imd.Circle(20, 2)
+					} else if e.entityType == "blackhole" {
+						imd.Color = colornames.Red
+						imd.Push(e.rect.Center())
+						imd.Circle(37, 2)
 					} else {
 						tmpTarget.Clear()
 						tmpTarget.SetMatrix(pixel.IM.Rotated(e.rect.Center(), e.target.Angle()))

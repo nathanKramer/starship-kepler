@@ -9,6 +9,8 @@ import (
 	"github.com/faiface/beep/speaker"
 )
 
+var soundFormat *beep.Format
+var shotSoundFormat *beep.Format
 var shotBuffer *beep.Buffer
 var spawnBuffer *beep.Buffer
 var spawnBuffer2 *beep.Buffer
@@ -17,6 +19,18 @@ var spawnBuffer4 *beep.Buffer
 var spawnBuffer5 *beep.Buffer
 var lifeBuffer *beep.Buffer
 var multiplierBuffer *beep.Buffer
+var multiplierBuffer2 *beep.Buffer
+var multiplierBuffer3 *beep.Buffer
+var multiplierBuffer4 *beep.Buffer
+var multiplierBuffer5 *beep.Buffer
+var multiplierBuffer6 *beep.Buffer
+var multiplierBuffer7 *beep.Buffer
+var multiplierBuffer8 *beep.Buffer
+var multiplierBuffer9 *beep.Buffer
+var multiplierBuffer10 *beep.Buffer
+
+var multiplierSounds map[int]*beep.Buffer
+
 var bombBuffer *beep.Buffer
 var musicStreamer *beep.StreamSeekCloser
 
@@ -30,7 +44,7 @@ func prepareStreamer(file string) (*beep.StreamSeekCloser, *beep.Format) {
 	return &streamer, &format
 }
 
-func prepareBuffer(file string) *beep.Buffer {
+func prepareBuffer(file string) (*beep.Buffer, *beep.Format) {
 	sound, _ := os.Open(file)
 	streamer, format, err := mp3.Decode(sound)
 	if err != nil {
@@ -40,26 +54,45 @@ func prepareBuffer(file string) *beep.Buffer {
 	buffer.Append(streamer)
 	streamer.Close()
 
-	return buffer
+	return buffer, &format
 }
 
 func init() {
 	// todo use a data structure probably
-	shotBuffer = prepareBuffer("sound/shoot.mp3")
+	shotBuffer, shotSoundFormat = prepareBuffer("sound/shoot.mp3")
 
-	spawnBuffer = prepareBuffer("sound/spawn.mp3")
-	spawnBuffer2 = prepareBuffer("sound/spawn2.mp3")
-	spawnBuffer3 = prepareBuffer("sound/spawn3.mp3")
-	spawnBuffer4 = prepareBuffer("sound/spawn4.mp3")
-	spawnBuffer5 = prepareBuffer("sound/spawn5.mp3")
+	spawnBuffer, _ = prepareBuffer("sound/spawn.mp3")
+	spawnBuffer2, _ = prepareBuffer("sound/spawn2.mp3")
+	spawnBuffer3, _ = prepareBuffer("sound/spawn3.mp3")
+	spawnBuffer4, _ = prepareBuffer("sound/spawn4.mp3")
+	spawnBuffer5, _ = prepareBuffer("sound/spawn5.mp3")
 
-	lifeBuffer = prepareBuffer("sound/life.mp3")
-	multiplierBuffer = prepareBuffer("sound/multiplierbonus.mp3")
-	bombBuffer = prepareBuffer("sound/usebomb.mp3")
+	lifeBuffer, _ = prepareBuffer("sound/life.mp3")
+	multiplierBuffer, _ = prepareBuffer("sound/multiplierbonus.mp3")
+	multiplierBuffer2, _ = prepareBuffer("sound/multiplierbonus2.mp3")
+	multiplierBuffer3, _ = prepareBuffer("sound/multiplierbonus3.mp3")
+	multiplierBuffer4, _ = prepareBuffer("sound/multiplierbonus4.mp3")
+	multiplierBuffer5, _ = prepareBuffer("sound/multiplierbonus5.mp3")
+	multiplierBuffer6, _ = prepareBuffer("sound/multiplierbonus6.mp3")
+	multiplierBuffer7, _ = prepareBuffer("sound/multiplierbonus7.mp3")
+	multiplierBuffer8, _ = prepareBuffer("sound/multiplierbonus8.mp3")
+	multiplierBuffer9, _ = prepareBuffer("sound/multiplierbonus9.mp3")
+	multiplierBuffer10, _ = prepareBuffer("sound/multiplierbonus10.mp3")
+	multiplierSounds = map[int]*beep.Buffer{}
+	multiplierSounds[2] = multiplierBuffer2
+	multiplierSounds[3] = multiplierBuffer3
+	multiplierSounds[4] = multiplierBuffer4
+	multiplierSounds[5] = multiplierBuffer5
+	multiplierSounds[6] = multiplierBuffer6
+	multiplierSounds[7] = multiplierBuffer7
+	multiplierSounds[8] = multiplierBuffer8
+	multiplierSounds[9] = multiplierBuffer9
+	multiplierSounds[10] = multiplierBuffer10
 
-	var musicFormat *beep.Format
-	musicStreamer, musicFormat = prepareStreamer("sound/music.mp3")
-	speaker.Init(musicFormat.SampleRate, musicFormat.SampleRate.N(time.Second/10))
+	bombBuffer, _ = prepareBuffer("sound/usebomb.mp3")
+
+	musicStreamer, soundFormat = prepareStreamer("sound/music.mp3")
+	speaker.Init(soundFormat.SampleRate, soundFormat.SampleRate.N(time.Second/10))
 }
 
 func playMusic() {
