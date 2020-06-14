@@ -31,21 +31,24 @@ var basicFont *text.Atlas
 type entityData struct {
 	target     pixel.Vec
 	origin     pixel.Vec
+	velocity   pixel.Vec
+	speed      float64
 	radius     float64
 	born       time.Time
 	death      time.Time
 	expiry     time.Time
 	alive      bool
-	speed      float64
 	entityType string
 	text       *text.Text
+	hp         int
 
 	// sounds
 	spawnSound *beep.Buffer
 
 	// enemy data
-	bounty     int
-	bountyText string
+	bounty       int
+	bountyText   string
+	killedPlayer bool
 }
 
 type bullet struct {
@@ -59,6 +62,7 @@ func NewEntity(x float64, y float64, size float64, speed float64, entityType str
 	p.origin = pixel.V(x, y)
 	p.radius = size / 2.0
 	p.speed = speed
+	p.hp = 1
 	p.alive = true
 	p.entityType = entityType
 	p.born = time.Now()
@@ -105,6 +109,7 @@ func NewPinkPleb(x float64, y float64) *entityData {
 func NewBlackHole(x float64, y float64) *entityData {
 	b := NewEntity(x, y, 75.0, 0.0, "blackhole")
 	b.bounty = 150
+	b.hp = 10
 	return b
 }
 
@@ -232,8 +237,8 @@ func NewGame() *game {
 }
 
 func (data *gamedata) respawnPlayer() {
-	data.entities = make([]entityData, 100)
-	data.bullets = make([]bullet, 100)
+	data.entities = make([]entityData, 0, 100)
+	data.bullets = make([]bullet, 0, 100)
 	data.player = *NewEntity(0.0, 0.0, 50, 280, "player")
 	data.scoreMultiplier = 1
 	data.scoreSinceBorn = 0
@@ -454,7 +459,8 @@ func run() {
 			}
 
 			// player controls
-			direction := pixel.V(0.0, 0.0)
+			direction := pixel.ZV
+			player.velocity = pixel.ZV
 			if win.Pressed(pixelgl.KeyLeft) || win.Pressed(pixelgl.KeyA) {
 				direction = direction.Add(pixel.V(-1, 0))
 			}
@@ -485,7 +491,7 @@ func run() {
 					1-math.Pow(1.0/512, dt),
 				))
 				player.target = targetDt
-				player.origin = player.origin.Add(direction.Scaled(player.speed * dt))
+				player.velocity = direction.Unit().Scaled(player.speed)
 			}
 
 			aim := thumbstickVector(win, currJoystick, pixelgl.AxisRightX, pixelgl.AxisRightY)
@@ -515,18 +521,18 @@ func run() {
 						leftB := NewBullet(
 							player.origin.X,
 							player.origin.Y,
-							1500, ang1Vec,
+							1200, ang1Vec,
 						)
 						b := NewBullet(
 							player.origin.X,
 							player.origin.Y,
-							1500,
+							1200,
 							aim.Unit(),
 						)
 						rightB := NewBullet(
 							player.origin.X,
 							player.origin.Y,
-							1500,
+							1200,
 							ang2Vec,
 						)
 						game.data.bullets = append(game.data.bullets, *leftB, *b, *rightB)
@@ -544,7 +550,7 @@ func run() {
 							b := NewBullet(
 								bPos.X,
 								bPos.Y,
-								900,
+								1100,
 								aim.Unit(),
 							)
 							game.data.bullets = append(game.data.bullets, *b)
@@ -555,13 +561,13 @@ func run() {
 						b1 := NewBullet(
 							b1Pos.X,
 							b1Pos.Y,
-							1200,
+							1100,
 							aim.Unit(),
 						)
 						b2 := NewBullet(
 							b2Pos.X,
 							b2Pos.Y,
-							1200,
+							1100,
 							aim.Unit(),
 						)
 						game.data.bullets = append(game.data.bullets, *b1, *b2)
@@ -583,7 +589,7 @@ func run() {
 				}
 			}
 
-			// move enemies
+			// set velocities
 			for i, e := range game.data.entities {
 				if !e.alive {
 					continue
@@ -630,15 +636,80 @@ func run() {
 						}
 					}
 				}
-				scaled := dir.Scaled(e.speed * dt)
-				e.origin = e.origin.Add(scaled)
-				e.enforceWorldBoundary()
+				e.velocity = dir.Scaled(e.speed)
 				game.data.entities[i] = e
 			}
 
 			for i, b := range game.data.bullets {
 				b.data.origin = b.data.origin.Add(b.velocity.Scaled(dt))
 				game.data.bullets[i] = b
+			}
+
+			// Process blackholes
+			// I don't really care about efficiency atm
+			for bID, b := range game.data.entities {
+				if !b.alive || b.entityType != "blackhole" {
+					continue
+				}
+				maxForce := 2.0
+
+				dist := player.origin.Sub(b.origin)
+				length := dist.Len()
+				if length <= 250.0 {
+					force := pixel.Lerp(
+						dist.Scaled(maxForce),
+						pixel.ZV,
+						length/250.0,
+					)
+					player.velocity = player.velocity.Sub(force)
+				}
+
+				for bulletID, bul := range game.data.bullets {
+					if bul.data.alive {
+						dist := bul.data.origin.Sub(b.origin)
+						length := dist.Len()
+						if length > 250.0 {
+							continue
+						}
+						bul.velocity = bul.velocity.Add(dist.Scaled(0.2))
+						game.data.bullets[bulletID] = bul
+					}
+				}
+
+				for eID, e := range game.data.entities {
+					if e.alive && eID != bID {
+						dist := b.origin.Sub(e.origin)
+						length := dist.Len()
+						if length > 250.0 {
+							continue
+						}
+						force := pixel.Lerp(
+							dist.Scaled(maxForce),
+							pixel.ZV,
+							length/250.0,
+						)
+						e.velocity = e.velocity.Add(force)
+
+						intersection := pixel.C(b.origin, b.radius+8.0).Intersect(e.Circle())
+						if intersection.Radius > 0 {
+							e.alive = false
+						}
+						game.data.entities[eID] = e
+					}
+				}
+			}
+
+			// Apply velocities
+			player.origin = player.origin.Add(player.velocity.Scaled(dt))
+
+			for i, e := range game.data.entities {
+				if !e.alive {
+					continue
+				}
+
+				e.origin = e.origin.Add(e.velocity.Scaled(dt))
+				e.enforceWorldBoundary()
+				game.data.entities[i] = e
 			}
 
 			// check for collisions
@@ -650,9 +721,7 @@ func run() {
 						continue
 					}
 
-					aCircle := pixel.C(a.origin, a.radius)
-					bCircle := pixel.C(b.origin, b.radius)
-					intersection := aCircle.Intersect(bCircle)
+					intersection := a.Circle().Intersect(b.Circle())
 					if intersection.Radius > 0 {
 						a.origin = a.origin.Add(
 							b.origin.To(a.origin).Unit().Scaled(intersection.Radius),
@@ -668,30 +737,34 @@ func run() {
 					for eID, e := range game.data.entities {
 						if e.alive && b.data.Circle().Intersect(e.Circle()).Radius > 0 {
 							b.data.alive = false
-							e.alive = false
-							e.death = last
-							e.expiry = last.Add(time.Millisecond * 300)
-							reward := e.bounty * game.data.scoreMultiplier
-							e.bountyText = fmt.Sprintf("%d", reward)
-
-							// on kill
-							if e.entityType == "pink" {
-								// spawn 3 mini plebs
-								for i := 0; i < 3; i++ {
-									pos := pixel.V(
-										rand.Float64()*100,
-										rand.Float64()*100,
-									).Add(e.origin)
-									pleb := *NewPinkPleb(pos.X, pos.Y)
-									entsToAdd = append(entsToAdd, pleb)
-								}
-								// spawnSound := entsToAdd[0].spawnSound.Streamer(0, entsToAdd[0].spawnSound.Len())
-								// speaker.Play(spawnSound)
-							}
-
-							game.data.score += reward
-							game.data.scoreSinceBorn += reward
 							game.data.bullets[bID] = b
+
+							e.hp -= 1
+							if e.hp <= 0 {
+								e.alive = false
+								e.death = last
+								e.expiry = last.Add(time.Millisecond * 300)
+								reward := e.bounty * game.data.scoreMultiplier
+								e.bountyText = fmt.Sprintf("%d", reward)
+
+								// on kill
+								if e.entityType == "pink" {
+									// spawn 3 mini plebs
+									for i := 0; i < 3; i++ {
+										pos := pixel.V(
+											rand.Float64()*100,
+											rand.Float64()*100,
+										).Add(e.origin)
+										pleb := *NewPinkPleb(pos.X, pos.Y)
+										entsToAdd = append(entsToAdd, pleb)
+									}
+									// spawnSound := entsToAdd[0].spawnSound.Streamer(0, entsToAdd[0].spawnSound.Len())
+									// speaker.Play(spawnSound)
+								}
+
+								game.data.score += reward
+								game.data.scoreSinceBorn += reward
+							}
 							game.data.entities[eID] = e
 							break
 						}
@@ -705,9 +778,14 @@ func run() {
 
 			game.data.entities = append(game.data.entities, entsToAdd...)
 
-			for _, e := range game.data.entities {
+			for eID, e := range game.data.entities {
 				if e.alive && e.Circle().Intersect(player.Circle()).Radius > 0 {
+					e.killedPlayer = true
+					game.data.entities[eID] = e
 					game.data.lives -= 1
+					player.alive = false
+					player.death = last
+
 					if game.data.lives == 0 {
 						game.state = "game_over"
 
@@ -721,8 +799,6 @@ func run() {
 							gameOverTxt.Dot.X -= (gameOverTxt.BoundsOf(line).W() / 2)
 							fmt.Fprintln(gameOverTxt, line)
 						}
-					} else {
-						player.alive = false
 					}
 				}
 			}
@@ -989,7 +1065,7 @@ func run() {
 					} else if e.entityType == "blackhole" {
 						imd.Color = colornames.Red
 						imd.Push(e.origin)
-						imd.Circle(37, 2)
+						imd.Circle(e.radius, 2)
 					} else {
 						tmpTarget.Clear()
 						tmpTarget.SetMatrix(pixel.IM.Rotated(e.origin, e.target.Angle()))
