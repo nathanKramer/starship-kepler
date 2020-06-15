@@ -505,7 +505,7 @@ func NewGame() *game {
 	game.state = "starting"
 	game.data = *NewGameData()
 
-	maxGridPoints := 2048.0
+	maxGridPoints := 1024.0
 	buffer := 256.0
 	gridSpacing := math.Sqrt(worldWidth * worldHeight / maxGridPoints)
 	game.grid = NewGrid(
@@ -610,6 +610,14 @@ func drawShip(d *imdraw.IMDraw) {
 
 func (e *entityData) Circle() pixel.Circle {
 	return pixel.C(e.origin, e.radius)
+}
+
+func outOfWorld(v pixel.Vec) bool {
+	return v.X < -worldWidth/2 || v.X > worldWidth/2 || v.Y < -worldHeight/2 || v.Y > worldHeight/2
+}
+
+func withinWorld(v pixel.Vec) bool {
+	return !outOfWorld(v)
 }
 
 func enforceWorldBoundary(v *pixel.Vec) { // this code seems dumb, TODO: find some api call that does it
@@ -949,12 +957,11 @@ func run() {
 			for i, b := range game.data.bullets {
 				b.data.origin = b.data.origin.Add(b.velocity.Scaled(dt))
 				if game.data.weapon.fireMode == "burst" {
-					dir := b.velocity.Scaled(dt).Scaled(2.0)
-					xyz := Vector3{dir.X, dir.Y, -8.0}
-					game.grid.ApplyDirectedForce(xyz, Vector3{b.data.origin.X, b.data.origin.Y, 0.0}, 80.0)
+					game.grid.ApplyExplosiveForce(b.velocity.Scaled(dt).Len()*2, Vector3{b.data.origin.X, b.data.origin.Y, 0.0}, 80.0)
 				} else {
 					game.grid.ApplyExplosiveForce(b.velocity.Scaled(dt).Len()*0.6, Vector3{b.data.origin.X, b.data.origin.Y, 0.0}, 40.0)
 				}
+
 				game.data.bullets[i] = b
 			}
 
@@ -1359,6 +1366,7 @@ func run() {
 		if game.state == "playing" {
 
 			// TODO, extract?
+			// Add catmullrom splines?
 			{
 				width := len(game.grid.points)
 				height := len(game.grid.points[0])
@@ -1373,41 +1381,54 @@ func run() {
 						// fmt.Printf("Drawing point %f %f\n", p.X, p.Y)
 						if x > 0 {
 							left = game.grid.points[x-1][y].origin.ToVec2(cfg.Bounds)
-							pOut := p.X < -worldWidth/2 || p.X > worldWidth/2 || p.Y < -worldHeight/2 || p.Y > worldHeight/2
-							lOut := left.X < -worldWidth/2 || left.X > worldWidth/2 || left.Y < -worldHeight/2 || left.Y > worldHeight/2
-							if pOut && lOut {
-								// Don't draw the spring when it is outside the game world.
-								// (Allows extra simulation just outside the game world for implosions to make use of)
-								continue
+							if withinWorld(p) || withinWorld(left) {
+								// It's possible that one but not the other point is brought in from out of the world boundary
+								// If being brought in from out of the world, render right on the border
+								enforceWorldBoundary(&p)
+								enforceWorldBoundary(&left)
+								thickness := 1.0
+								if y%3 == 1 {
+									thickness = 2.0
+								}
+								imd.Push(left, p)
+								imd.Line(thickness)
 							}
-
-							enforceWorldBoundary(&p)
-							enforceWorldBoundary(&left) // If being brought in from out of the game world, render right on the border
-							thickness := 1.0
-							if y%3 == 1 {
-								thickness = 2.0
-							}
-							imd.Push(left, p)
-							imd.Line(thickness)
 						}
 						if y > 0 {
 							up = game.grid.points[x][y-1].origin.ToVec2(cfg.Bounds)
-							pOut := p.X < -worldWidth/2 || p.X > worldWidth/2 || p.Y < -worldHeight/2 || p.Y > worldHeight/2
-							uOut := up.X < -worldWidth/2 || up.X > worldWidth/2 || up.Y < -worldHeight/2 || up.Y > worldHeight/2
-							if pOut && uOut {
-								// Don't draw the spring when it is outside the game world.
-								// (Allows extra simulation just outside the game world for implosions to make use of)
-								continue
+							if withinWorld(p) || withinWorld(up) {
+								// It's possible that one but not the other point is brought in from out of the world boundary
+								// If being brought in from out of the world, render right on the border
+								enforceWorldBoundary(&p)
+								enforceWorldBoundary(&up)
+								thickness := 1.0
+								if y%3 == 1 {
+									thickness = 3.0
+								}
+								imd.Push(up, p)
+								imd.Line(thickness)
+							}
+						}
+
+						if x > 0 && y > 0 {
+							upLeft := game.grid.points[x-1][y-1].origin.ToVec2(cfg.Bounds)
+							p1, p2 := upLeft.Add(up).Scaled(0.5), left.Add(p).Scaled(0.5)
+
+							if withinWorld(p1) || withinWorld(p2) {
+								enforceWorldBoundary(&p1)
+								enforceWorldBoundary(&p2)
+								imd.Push(p1, p2)
+								imd.Line(1.0)
 							}
 
-							enforceWorldBoundary(&p)
-							enforceWorldBoundary(&up) // If being brought in from out of the game world, render right on the border
-							thickness := 1.0
-							if y%3 == 1 {
-								thickness = 3.0
+							p3, p4 := upLeft.Add(left).Scaled(0.5), up.Add(p).Scaled(0.5)
+
+							if withinWorld(p3) || withinWorld(p4) {
+								enforceWorldBoundary(&p3)
+								enforceWorldBoundary(&p4)
+								imd.Push(p3, p4)
+								imd.Line(1.0)
 							}
-							imd.Push(up, p)
-							imd.Line(thickness)
 						}
 					}
 				}
