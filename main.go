@@ -19,11 +19,281 @@ import (
 	"golang.org/x/image/font/basicfont"
 )
 
-const worldWidth = 1200
-const worldHeight = 800
+const worldWidth = 1440.0
+const worldHeight = 1080.0
 const debug = false
 
 var basicFont *text.Atlas
+
+// GRID
+
+type Vector3 struct {
+	X float64
+	Y float64
+	Z float64
+}
+
+func v3zero() Vector3 {
+	return Vector3{0.0, 0.0, 0.0}
+}
+
+func (a Vector3) Add(b Vector3) Vector3 {
+	return Vector3{a.X + b.X, a.Y + b.Y, a.Z + b.Z}
+}
+
+func (a Vector3) Div(b float64) Vector3 {
+	return Vector3{a.X / b, a.Y / b, a.Z / b}
+}
+
+func (a Vector3) Sub(b Vector3) Vector3 {
+	return Vector3{a.X - b.X, a.Y - b.Y, a.Z - b.Z}
+}
+
+func (a Vector3) Mul(b float64) Vector3 {
+	return Vector3{a.X * b, a.Y * b, a.Z * b}
+}
+
+func (a Vector3) Len() float64 {
+	return math.Sqrt(a.LengthSquared())
+}
+
+func (a Vector3) LengthSquared() float64 {
+	return a.X*a.X + a.Y*a.Y + a.Z*a.Z
+}
+
+func (a Vector3) ToVec2(screenSize pixel.Rect) pixel.Vec {
+	// hard-coded perspective projection
+	factor := (a.Z + 2000) / 2000
+	return pixel.V(a.X, a.Y).Sub(screenSize.Max.Scaled(0.5)).Scaled(factor).Add(screenSize.Max.Scaled(0.5))
+	// return pixel.V(a.X, a.Y)
+}
+
+type pointMass struct {
+	origin       Vector3
+	velocity     Vector3
+	inverseMass  float64
+	acceleration Vector3
+	damping      float64
+}
+
+func NewPointMass(pos Vector3, invMass float64) *pointMass {
+	mass := pointMass{}
+	mass.origin = pos
+	mass.acceleration = v3zero()
+	mass.velocity = v3zero()
+	mass.inverseMass = invMass
+	mass.damping = 0.98
+	return &mass
+}
+
+func (pm *pointMass) ApplyForce(force Vector3) {
+	pm.acceleration = pm.acceleration.Add(force.Mul(pm.inverseMass))
+}
+
+func (pm *pointMass) IncreaseDamping(factor float64) {
+	pm.damping *= factor
+}
+
+// // spring simulation using "symplectic Euler integration"
+// via https://gamedevelopment.tutsplus.com/tutorials/make-a-neon-vector-shooter-in-xna-the-warping-grid--gamedev-9904
+func (pm *pointMass) Update() {
+	pm.velocity = pm.velocity.Add(pm.acceleration)
+	pm.origin = pm.origin.Add(pm.velocity)
+	pm.acceleration = v3zero()
+	if pm.velocity.LengthSquared() < 0.001*0.001 {
+		pm.velocity = v3zero()
+	}
+
+	pm.velocity = pm.velocity.Mul(pm.damping)
+	pm.damping = 0.98
+}
+
+type spring struct {
+	end1         *pointMass
+	end2         *pointMass
+	targetLength float64
+	stiffness    float64
+	damping      float64
+}
+
+func NewSpring(end1 *pointMass, end2 *pointMass, stiffness float64, damping float64) *spring {
+	s := spring{
+		end1:         end1,
+		end2:         end2,
+		stiffness:    stiffness,
+		damping:      damping,
+		targetLength: end1.origin.Sub(end2.origin).Len() * 0.95,
+	}
+	return &s
+}
+
+func (s *spring) Update() {
+	x := s.end1.origin.Sub(s.end2.origin)
+	len := x.Len()
+	if len <= s.targetLength {
+		return
+	}
+
+	x = x.Div(len).Mul(len - s.targetLength)
+	dv := s.end2.velocity.Sub(s.end1.velocity)
+	force := x.Mul(s.stiffness).Sub(
+		dv.Mul(s.damping),
+	)
+
+	s.end1.ApplyForce(force.Mul(-1))
+	s.end2.ApplyForce(force)
+}
+
+type grid struct {
+	springs []*spring
+	points  [][]*pointMass
+}
+
+func NewGrid(size pixel.Rect, spacing pixel.Vec) grid {
+	g := grid{}
+
+	// fmt.Printf(
+	// 	"[NewGrid] size: [%f, %f], [%f, %f], spacing: [%f, %f]\n",
+	// 	size.Min.X, size.Min.Y, size.Max.X, size.Max.Y, spacing.X, spacing.Y,
+	// )
+	numCols := int(size.W()/spacing.X) + 1
+	numRows := int(size.H()/spacing.Y) + 1
+
+	g.points = make([][]*pointMass, numCols)
+	for c := range g.points {
+		g.points[c] = make([]*pointMass, numRows)
+	}
+
+	// these fixed points will be used to anchor the grid to fixed positions on the screen
+	fixedPoints := make([][]*pointMass, numCols)
+	for c := range fixedPoints {
+		fixedPoints[c] = make([]*pointMass, numRows)
+	}
+
+	// create the point masses
+	column, row := 0, 0
+	for y := size.Min.Y; y <= size.Max.Y; y += spacing.Y {
+		for x := size.Min.X; x <= size.Max.X; x += spacing.X {
+			g.points[column][row] = NewPointMass(
+				Vector3{x, y, 0.0}, 1.0,
+			)
+			fixedPoints[column][row] = NewPointMass(
+				Vector3{x, y, 0.0}, 0.0,
+			)
+			column++
+		}
+		row++
+		column = 0
+	}
+
+	// link the point masses together with springs
+	g.springs = make([]*spring, numRows*numCols)
+	for y := 0; y < numRows; y++ {
+		for x := 0; x < numCols; x++ {
+			if x == 0 || y == 0 || x == (numCols-1) || y == (numRows-1) {
+				// anchor the border of the grid
+				g.springs = append(
+					g.springs,
+					NewSpring(fixedPoints[x][y], g.points[x][y], 0.1, 0.1),
+				)
+			} else if x%3 == 0 && y%3 == 0 {
+				// loosely anchor 1/9th of the point masses
+				g.springs = append(
+					g.springs,
+					NewSpring(fixedPoints[x][y], g.points[x][y], 0.002, 0.002),
+				)
+			}
+
+			stiffness := 0.28
+			damping := 0.06
+
+			if x > 0 {
+				g.springs = append(
+					g.springs,
+					NewSpring(
+						g.points[x-1][y], g.points[x][y], stiffness, damping,
+					),
+				)
+			}
+			if y > 0 {
+				g.springs = append(
+					g.springs,
+					NewSpring(
+						g.points[x][y-1], g.points[x][y], stiffness, damping,
+					),
+				)
+			}
+		}
+	}
+	return g
+}
+
+func (g *grid) Update() {
+	for _, s := range g.springs {
+		if s != nil {
+			s.Update()
+		}
+	}
+
+	for _, col := range g.points {
+		for _, point := range col {
+			if point != nil {
+				point.Update()
+			}
+		}
+	}
+}
+
+func (g *grid) ApplyDirectedForce(force Vector3, origin Vector3, radius float64) {
+	for _, col := range g.points {
+		for _, point := range col {
+			if origin.Sub(point.origin).LengthSquared() < radius*radius {
+				point.ApplyForce(
+					force.Mul(10).Div(origin.Sub(point.origin).Len() + 10),
+				)
+			}
+		}
+	}
+}
+
+func (g *grid) ApplyImplosiveForce(force float64, origin Vector3, radius float64) {
+	for _, col := range g.points {
+		for _, point := range col {
+			dist2 := origin.Sub(point.origin).LengthSquared()
+			if dist2 < radius*radius {
+				forceMultiplier := origin.Sub(point.origin).Mul(10 * force).Div(100 + dist2)
+				point.ApplyForce(forceMultiplier)
+				point.IncreaseDamping(0.6)
+			}
+		}
+	}
+}
+
+func (g *grid) ApplyTightImplosiveForce(force float64, origin Vector3, radius float64) {
+	for _, col := range g.points {
+		for _, point := range col {
+			dist2 := origin.Sub(point.origin).LengthSquared()
+			if dist2 < radius*radius {
+				forceMultiplier := origin.Sub(point.origin).Mul(100 * force).Div(10000 + dist2)
+				point.ApplyForce(forceMultiplier)
+				point.IncreaseDamping((0.6))
+			}
+		}
+	}
+}
+
+func (g *grid) ApplyExplosiveForce(force float64, origin Vector3, radius float64) {
+	for _, col := range g.points {
+		for _, point := range col {
+			dist2 := origin.Sub(point.origin).LengthSquared()
+			if dist2 < radius*radius {
+				forceMultiplier := point.origin.Sub(origin).Mul(100 * force).Div(10000 + dist2)
+				point.ApplyForce(forceMultiplier)
+				point.IncreaseDamping((0.6))
+			}
+		}
+	}
+}
 
 // ENTITIES
 
@@ -71,7 +341,7 @@ func NewEntity(x float64, y float64, size float64, speed float64, entityType str
 }
 
 func NewFollower(x float64, y float64) *entityData {
-	e := NewEntity(x, y, 50.0, 120, "follower")
+	e := NewEntity(x, y, 50.0, 240, "follower")
 	e.target = pixel.V(1.0, 1.0)
 	e.spawnSound = spawnBuffer
 	e.bounty = 50
@@ -79,28 +349,28 @@ func NewFollower(x float64, y float64) *entityData {
 }
 
 func NewWanderer(x float64, y float64) *entityData {
-	w := NewEntity(x, y, 40.0, 40, "wanderer")
+	w := NewEntity(x, y, 40.0, 100, "wanderer")
 	w.spawnSound = spawnBuffer4
 	w.bounty = 25
 	return w
 }
 
 func NewDodger(x float64, y float64) *entityData {
-	w := NewEntity(x, y, 50.0, 140, "dodger")
+	w := NewEntity(x, y, 50.0, 240, "dodger")
 	w.spawnSound = spawnBuffer2
 	w.bounty = 100
 	return w
 }
 
 func NewPinkSquare(x float64, y float64) *entityData {
-	w := NewEntity(x, y, 50.0, 140, "pink")
+	w := NewEntity(x, y, 50.0, 260, "pink")
 	w.spawnSound = spawnBuffer5
 	w.bounty = 100
 	return w
 }
 
 func NewPinkPleb(x float64, y float64) *entityData {
-	w := NewEntity(x, y, 30.0, 180, "pinkpleb")
+	w := NewEntity(x, y, 30.0, 220, "pinkpleb")
 	// w.spawnSound = spawnBuffer4
 	w.bounty = 75
 	return w
@@ -155,6 +425,7 @@ type gamedata struct {
 	waveFreq          float64
 	weaponUpgradeFreq float64
 	spawnFreq         float64
+	spawning          bool
 
 	lastSpawn         time.Time
 	lastBullet        time.Time
@@ -165,6 +436,7 @@ type gamedata struct {
 type game struct {
 	state string
 	data  gamedata
+	grid  grid
 }
 
 func NewWaveData() *wavedata {
@@ -206,7 +478,7 @@ func NewGameData() *gamedata {
 	gameData.scoreMultiplier = 1
 	gameData.entities = make([]entityData, 0, 100)
 	gameData.bullets = make([]bullet, 0, 100)
-	gameData.player = *NewEntity(0.0, 0.0, 50, 320, "player")
+	gameData.player = *NewEntity(0.0, 0.0, 50, 400, "player")
 	gameData.spawns = 0
 	gameData.spawnCount = 1
 	gameData.scoreSinceBorn = 0
@@ -219,7 +491,7 @@ func NewGameData() *gamedata {
 	gameData.waveFreq = 30
 	gameData.weaponUpgradeFreq = 30
 	gameData.spawnFreq = 1.5
-
+	gameData.spawning = true
 	gameData.lastSpawn = time.Now()
 	gameData.lastBullet = time.Now()
 	gameData.lastBomb = time.Now()
@@ -233,13 +505,29 @@ func NewGame() *game {
 	game.state = "starting"
 	game.data = *NewGameData()
 
+	maxGridPoints := 2048.0
+	buffer := 256.0
+	gridSpacing := math.Sqrt(worldWidth * worldHeight / maxGridPoints)
+	game.grid = NewGrid(
+		pixel.R(
+			-worldWidth/2-buffer,
+			-worldHeight/2-buffer,
+			worldWidth/2+buffer,
+			worldHeight/2+buffer,
+		),
+		pixel.V(
+			gridSpacing,
+			gridSpacing,
+		),
+	)
+
 	return game
 }
 
 func (data *gamedata) respawnPlayer() {
 	data.entities = make([]entityData, 0, 100)
 	data.bullets = make([]bullet, 0, 100)
-	data.player = *NewEntity(0.0, 0.0, 50, 280, "player")
+	data.player = *NewEntity(0.0, 0.0, 50, 400, "player")
 	data.scoreMultiplier = 1
 	data.scoreSinceBorn = 0
 }
@@ -322,6 +610,23 @@ func drawShip(d *imdraw.IMDraw) {
 
 func (e *entityData) Circle() pixel.Circle {
 	return pixel.C(e.origin, e.radius)
+}
+
+func enforceWorldBoundary(v *pixel.Vec) { // this code seems dumb, TODO: find some api call that does it
+	minX := -(worldWidth / 2.0)
+	minY := -(worldHeight / 2.0)
+	maxX := (worldWidth / 2.)
+	maxY := (worldHeight / 2.0)
+	if v.X < minX {
+		v.X = minX
+	} else if v.X > maxX {
+		v.X = maxX
+	}
+	if v.Y < minY {
+		v.Y = minY
+	} else if v.Y > maxY {
+		v.Y = maxY
+	}
 }
 
 func (p *entityData) enforceWorldBoundary() { // this code seems dumb, TODO: find some api call that does it
@@ -447,6 +752,7 @@ func run() {
 		if game.state == "playing" {
 			if !player.alive {
 				game.respawnPlayer()
+				game.grid.ApplyDirectedForce(Vector3{0.0, 0.0, 5000.0}, Vector3{player.origin.X, player.origin.Y, 0.0}, 50)
 			}
 
 			if win.Pressed(pixelgl.KeyP) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonStart) {
@@ -642,6 +948,13 @@ func run() {
 
 			for i, b := range game.data.bullets {
 				b.data.origin = b.data.origin.Add(b.velocity.Scaled(dt))
+				if game.data.weapon.fireMode == "burst" {
+					dir := b.velocity.Scaled(dt).Scaled(2.0)
+					xyz := Vector3{dir.X, dir.Y, -8.0}
+					game.grid.ApplyDirectedForce(xyz, Vector3{b.data.origin.X, b.data.origin.Y, 0.0}, 80.0)
+				} else {
+					game.grid.ApplyExplosiveForce(b.velocity.Scaled(dt).Len()*0.6, Vector3{b.data.origin.X, b.data.origin.Y, 0.0}, 40.0)
+				}
 				game.data.bullets[i] = b
 			}
 
@@ -652,6 +965,8 @@ func run() {
 					continue
 				}
 				maxForce := 2.0
+
+				game.grid.ApplyImplosiveForce(20, Vector3{b.origin.X, b.origin.Y, 0.0}, 150)
 
 				dist := player.origin.Sub(b.origin)
 				length := dist.Len()
@@ -698,6 +1013,8 @@ func run() {
 					}
 				}
 			}
+
+			game.grid.Update()
 
 			// Apply velocities
 			player.origin = player.origin.Add(player.velocity.Scaled(dt))
@@ -806,6 +1123,7 @@ func run() {
 			// check for bomb here for now
 			bombPressed := win.Pressed(pixelgl.KeyR) || win.JoystickAxis(currJoystick, pixelgl.AxisRightTrigger) > 0.1
 			if game.data.bombs > 0 && bombPressed && last.Sub(game.data.lastBomb).Seconds() > 3.0 {
+				game.grid.ApplyExplosiveForce(256.0, Vector3{player.origin.X, player.origin.Y, 0.0}, 800)
 				sound := bombBuffer.Streamer(0, bombBuffer.Len())
 				volume := &effects.Volume{
 					Streamer: sound,
@@ -846,7 +1164,7 @@ func run() {
 			// spawn entities
 
 			// ambient spawns
-			if last.Sub(game.data.lastSpawn).Seconds() > game.data.spawnFreq {
+			if last.Sub(game.data.lastSpawn).Seconds() > game.data.spawnFreq && game.data.spawning {
 				// spawn
 				spawns := make([]entityData, 0, game.data.spawnCount)
 				for i := 0; i < game.data.spawnCount; i++ {
@@ -1039,8 +1357,65 @@ func run() {
 		imd.Clear()
 
 		if game.state == "playing" {
+
+			// TODO, extract?
+			{
+				width := len(game.grid.points)
+				height := len(game.grid.points[0])
+				imd.SetColorMask(pixel.Alpha(0.4))
+				imd.Color = color.RGBA{30, 30, 139, 255} // The alpha component here doesn't seem to be respected :/
+
+				for y := 0; y < height; y++ {
+					for x := 0; x < width; x++ {
+						left, up := pixel.ZV, pixel.ZV
+						p := game.grid.points[x][y].origin.ToVec2(cfg.Bounds)
+
+						// fmt.Printf("Drawing point %f %f\n", p.X, p.Y)
+						if x > 0 {
+							left = game.grid.points[x-1][y].origin.ToVec2(cfg.Bounds)
+							pOut := p.X < -worldWidth/2 || p.X > worldWidth/2 || p.Y < -worldHeight/2 || p.Y > worldHeight/2
+							lOut := left.X < -worldWidth/2 || left.X > worldWidth/2 || left.Y < -worldHeight/2 || left.Y > worldHeight/2
+							if pOut && lOut {
+								// Don't draw the spring when it is outside the game world.
+								// (Allows extra simulation just outside the game world for implosions to make use of)
+								continue
+							}
+
+							enforceWorldBoundary(&p)
+							enforceWorldBoundary(&left) // If being brought in from out of the game world, render right on the border
+							thickness := 1.0
+							if y%3 == 1 {
+								thickness = 2.0
+							}
+							imd.Push(left, p)
+							imd.Line(thickness)
+						}
+						if y > 0 {
+							up = game.grid.points[x][y-1].origin.ToVec2(cfg.Bounds)
+							pOut := p.X < -worldWidth/2 || p.X > worldWidth/2 || p.Y < -worldHeight/2 || p.Y > worldHeight/2
+							uOut := up.X < -worldWidth/2 || up.X > worldWidth/2 || up.Y < -worldHeight/2 || up.Y > worldHeight/2
+							if pOut && uOut {
+								// Don't draw the spring when it is outside the game world.
+								// (Allows extra simulation just outside the game world for implosions to make use of)
+								continue
+							}
+
+							enforceWorldBoundary(&p)
+							enforceWorldBoundary(&up) // If being brought in from out of the game world, render right on the border
+							thickness := 1.0
+							if y%3 == 1 {
+								thickness = 3.0
+							}
+							imd.Push(up, p)
+							imd.Line(thickness)
+						}
+					}
+				}
+			}
+
 			// draw player
 			imd.Color = colornames.White
+			imd.SetColorMask(pixel.Alpha(1))
 			d := imdraw.New(nil)
 			if debug {
 				d.Color = colornames.Lightgreen
