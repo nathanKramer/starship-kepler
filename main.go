@@ -19,6 +19,7 @@ import (
 	"golang.org/x/image/font/basicfont"
 )
 
+const maxParticles = 1600
 const worldWidth = 1440.0
 const worldHeight = 1080.0
 const debug = false
@@ -97,6 +98,10 @@ func (a Vector3) ToVec2(screenSize pixel.Rect) pixel.Vec {
 	factor := (a.Z + 2000) / 2000
 	return pixel.V(a.X, a.Y).Sub(screenSize.Max.Scaled(0.5)).Scaled(factor).Add(screenSize.Max.Scaled(0.5))
 	// return pixel.V(a.X, a.Y)
+}
+
+func randomVector(magnitude float64) pixel.Vec {
+	return pixel.V(rand.Float64()-0.5, rand.Float64()-0.5).Unit().Scaled(magnitude)
 }
 
 func HSVToColor(h float64, s float64, v float64) pixel.RGBA {
@@ -534,7 +539,7 @@ func NewGameData() *gamedata {
 	gameData.scoreMultiplier = 1
 	gameData.entities = make([]entityData, 0, 100)
 	gameData.bullets = make([]bullet, 0, 100)
-	gameData.particles = make([]particle, 0, 500)
+	gameData.particles = make([]particle, 0, maxParticles)
 	gameData.player = *NewEntity(0.0, 0.0, 50, 400, "player")
 	gameData.spawns = 0
 	gameData.spawnCount = 1
@@ -1044,6 +1049,23 @@ func run() {
 					player.velocity = player.velocity.Sub(force)
 				}
 
+				for pID, p := range game.data.particles {
+					if p == (particle{}) {
+						continue
+					}
+
+					dist := b.origin.Sub(p.origin)
+					length := dist.Len()
+
+					n := dist.Unit()
+					p.velocity = p.velocity.Add(n.Scaled(10000.0 / ((length * length) + 10000.0)))
+
+					if length < 400 {
+						p.velocity = p.velocity.Add(pixel.Vec{n.Y, -n.X}.Scaled(45 / (length + 250.0)))
+					}
+					game.data.particles[pID] = p
+				}
+
 				for bulletID, bul := range game.data.bullets {
 					if bul.data.alive {
 						dist := bul.data.origin.Sub(b.origin)
@@ -1080,29 +1102,6 @@ func run() {
 			}
 
 			game.grid.Update()
-
-			for pID, p := range game.data.particles {
-				if p != (particle{}) {
-					p.origin = p.origin.Add(p.velocity)
-					p.orientation = p.velocity.Angle()
-
-					p.percentLife -= 1.0 / p.duration
-
-					speed := p.velocity.Len()
-					alpha := math.Min(1, math.Min(p.percentLife*2, speed*1.0))
-					alpha *= alpha
-					p.colour.A = alpha
-					p.scale.X = p.lengthMultiplier * math.Min(math.Min(1.0, 0.2*speed+0.1), alpha)
-
-					if math.Abs(p.velocity.X)+math.Abs(p.velocity.Y) < 0.00000001 {
-						p.velocity = pixel.ZV
-					}
-
-					p.velocity = p.velocity.Scaled(0.97)
-
-					game.data.particles[pID] = p
-				}
-			}
 
 			// Apply velocities
 			player.origin = player.origin.Add(player.velocity.Scaled(dt))
@@ -1144,31 +1143,6 @@ func run() {
 							b.data.alive = false
 							game.data.bullets[bID] = b
 
-							// Draw particles
-							hue1 := rand.Float64() * 6.0
-							hue2 := hue1 + math.Mod(rand.Float64()*0.3, 0.3)
-							for i := 0; i < 120; i++ {
-								speed := 18 * (1.0 - (1.0 / (rand.Float64() * 10.0)))
-								t := rand.Float64()
-								hue := (hue1 * (1.0 - t)) + (hue2 * t)
-
-								v := pixel.V((rand.Float64()*speed)-(speed/2), (rand.Float64()*speed)-(speed/2))
-
-								p := NewParticle(
-									e.origin.X,
-									e.origin.Y,
-									HSVToColor(hue, 0.5, 1.0),
-									64,
-									pixel.V(1.5, 1.5),
-									0.0,
-									v,
-									1.8,
-									"enemy",
-								)
-
-								game.data.particles = append(game.data.particles, p)
-							}
-
 							e.hp -= 1
 							if e.hp <= 0 {
 								e.alive = false
@@ -1176,6 +1150,33 @@ func run() {
 								e.expiry = last.Add(time.Millisecond * 300)
 								reward := e.bounty * game.data.scoreMultiplier
 								e.bountyText = fmt.Sprintf("%d", reward)
+
+								// Draw particles
+								hue1 := rand.Float64() * 6.0
+								hue2 := math.Mod(hue1+rand.Float64()*1.5, 6.0)
+								for i := 0; i < 120; i++ {
+									speed := 18 * (1.0 - (1.0 / ((rand.Float64() * 10.0) + 1.0)))
+									t := rand.Float64()
+									hue := (hue1 * (1.0 - t)) + (hue2 * t)
+
+									p := NewParticle(
+										e.origin.X,
+										e.origin.Y,
+										HSVToColor(hue, 0.5, 1.0),
+										64,
+										pixel.V(1.5, 1.5),
+										0.0,
+										randomVector(speed),
+										1.8,
+										"enemy",
+									)
+
+									if len(game.data.particles) < maxParticles {
+										game.data.particles = append(game.data.particles, p)
+									} else {
+										game.data.particles[len(game.data.particles)%maxParticles] = p
+									}
+								}
 
 								// on kill
 								if e.entityType == "pink" {
@@ -1194,12 +1195,46 @@ func run() {
 
 								game.data.score += reward
 								game.data.scoreSinceBorn += reward
+							} else {
+								// still alive
+								// if black hole, emit sound particles to indicate damage
+								if e.entityType == "blackhole" {
+									hue1 := 1.0
+									hue2 := hue1 + (rand.Float64() * 0.5) - 0.25
+									for i := 0; i < 32; i++ {
+										speed := 16 * (1.0 - (1.0 / ((rand.Float64() * 8.0) + 1.0)))
+										t := rand.Float64()
+										hue := (hue1 * (1.0 - t)) + (hue2 * t)
+
+										p := NewParticle(
+											e.origin.X,
+											e.origin.Y,
+											HSVToColor(hue, 0.5, 1.0),
+											64,
+											pixel.V(1.0, 1.0),
+											0.0,
+											randomVector(speed),
+											1.0,
+											"enemy",
+										)
+
+										game.data.particles = append(game.data.particles, p)
+									}
+
+								}
 							}
 							game.data.entities[eID] = e
 							break
 						}
 					}
 					if !pixel.R(-worldWidth/2, -worldHeight/2, worldWidth/2, worldHeight/2).Contains(b.data.origin) {
+
+						// explode bullets when they hit the edge
+						for i := 0; i < 30; i++ {
+							p := NewParticle(b.data.origin.X, b.data.origin.Y, pixel.ToRGBA(colornames.Lightblue), 32, pixel.Vec{1.0, 1.0}, 0.0, randomVector(5.0), 1.0, "bullet")
+							game.data.particles = append(game.data.particles, p)
+						}
+
 						b.data.alive = false
 						game.data.bullets[bID] = b
 					}
@@ -1215,6 +1250,12 @@ func run() {
 					game.data.lives -= 1
 					player.alive = false
 					player.death = last
+
+					for i := 0; i < 1200; i++ {
+						speed := 24.0 * (1.0 - 1/((rand.Float64()*32.0)+1))
+						p := NewParticle(player.origin.X, player.origin.Y, pixel.ToRGBA(colornames.Lightyellow), 100, pixel.Vec{1.5, 1.5}, 0.0, randomVector(speed), 2.5, "player")
+						game.data.particles = append(game.data.particles, p)
+					}
 
 					if game.data.lives == 0 {
 						game.state = "game_over"
@@ -1256,8 +1297,52 @@ func run() {
 				}
 			}
 
+			for pID, p := range game.data.particles {
+				if p != (particle{}) {
+					p.origin = p.origin.Add(p.velocity)
+
+					minX := -worldWidth / 2
+					minY := -worldHeight / 2
+					maxX := worldWidth / 2
+					maxY := worldHeight / 2
+					// collide with the edges of the screen
+					if p.origin.X < minX {
+						p.origin.X = minX
+						p.velocity.X = math.Abs(p.velocity.X)
+					} else if p.origin.X > maxX {
+						p.origin.X = maxX
+						p.velocity.X = -math.Abs(p.velocity.X)
+					}
+					if p.origin.Y < minY {
+						p.origin.Y = minY
+						p.velocity.Y = math.Abs(p.velocity.Y)
+					} else if p.origin.Y > maxY {
+						p.origin.Y = maxY
+						p.velocity.Y = -math.Abs(p.velocity.Y)
+					}
+
+					p.orientation = p.velocity.Angle()
+
+					p.percentLife -= 1.0 / p.duration
+
+					speed := p.velocity.Len()
+					alpha := math.Min(1, math.Min(p.percentLife*2, speed*1.0))
+					alpha *= alpha
+					p.colour.A = alpha
+					p.scale.X = p.lengthMultiplier * math.Min(math.Min(1.0, 0.2*speed+0.1), alpha)
+
+					if math.Abs(p.velocity.X)+math.Abs(p.velocity.Y) < 0.00000001 {
+						p.velocity = pixel.ZV
+					}
+
+					p.velocity = p.velocity.Scaled(0.97)
+
+					game.data.particles[pID] = p
+				}
+			}
+
 			// kill particles
-			newParticles := make([]particle, 0, 500)
+			newParticles := make([]particle, 0, maxParticles)
 			for _, p := range game.data.particles {
 				if p.percentLife > 0 {
 					newParticles = append(newParticles, p)
