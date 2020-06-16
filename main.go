@@ -25,6 +25,37 @@ const debug = false
 
 var basicFont *text.Atlas
 
+// Particles
+
+type particle struct {
+	origin      pixel.Vec
+	orientation float64
+	scale       pixel.Vec
+
+	colour      pixel.RGBA
+	duration    float64
+	percentLife float64
+
+	velocity         pixel.Vec
+	lengthMultiplier float64
+	particleType     string
+}
+
+func NewParticle(x float64, y float64, c pixel.RGBA, duration float64, scale pixel.Vec, theta float64, velocity pixel.Vec, lengthMultiplier float64, t string) particle {
+	p := particle{}
+	p.origin = pixel.V(x, y)
+	p.colour = c
+	p.duration = duration
+	p.scale = scale
+	p.orientation = theta
+	p.velocity = velocity
+	p.lengthMultiplier = lengthMultiplier
+	p.particleType = t
+
+	p.percentLife = 1.0
+	return p
+}
+
 // GRID
 
 type Vector3 struct {
@@ -66,6 +97,30 @@ func (a Vector3) ToVec2(screenSize pixel.Rect) pixel.Vec {
 	factor := (a.Z + 2000) / 2000
 	return pixel.V(a.X, a.Y).Sub(screenSize.Max.Scaled(0.5)).Scaled(factor).Add(screenSize.Max.Scaled(0.5))
 	// return pixel.V(a.X, a.Y)
+}
+
+func HSVToColor(h float64, s float64, v float64) pixel.RGBA {
+	if h == 0 && s == 0 {
+		return pixel.RGBA{v, v, v, 1.0}
+	}
+
+	c := s * v
+	x := c * (1 - math.Abs(math.Mod(h, 2)-1))
+	m := v - c
+
+	if h < 1 {
+		return pixel.RGBA{c + m, x + m, m, 1.0}
+	} else if h < 2 {
+		return pixel.RGBA{x + m, c + m, m, 1.0}
+	} else if h < 3 {
+		return pixel.RGBA{m, c + m, x + m, 1.0}
+	} else if h < 4 {
+		return pixel.RGBA{m, x + m, c + m, 1.0}
+	} else if h < 5 {
+		return pixel.RGBA{x + m, m, c + m, 1.0}
+	}
+
+	return pixel.RGBA{c + m, m, x + m, 1.0}
 }
 
 type pointMass struct {
@@ -411,6 +466,7 @@ type gamedata struct {
 	scoreMultiplier int
 	entities        []entityData
 	bullets         []bullet
+	particles       []particle
 	spawns          int
 	spawnCount      int
 	scoreSinceBorn  int
@@ -478,6 +534,7 @@ func NewGameData() *gamedata {
 	gameData.scoreMultiplier = 1
 	gameData.entities = make([]entityData, 0, 100)
 	gameData.bullets = make([]bullet, 0, 100)
+	gameData.particles = make([]particle, 0, 500)
 	gameData.player = *NewEntity(0.0, 0.0, 50, 400, "player")
 	gameData.spawns = 0
 	gameData.spawnCount = 1
@@ -701,6 +758,7 @@ func run() {
 	imd := imdraw.New(nil)
 	playerDraw := imdraw.New(nil)
 	bulletDraw := imdraw.New(nil)
+	particleDraw := imdraw.New(nil)
 	tmpTarget := imdraw.New(nil)
 	camPos := pixel.ZV
 
@@ -946,7 +1004,7 @@ func run() {
 								dodgeDirection = dodge2
 							}
 							dodgeVec := pixel.V(math.Cos(dodgeDirection), math.Sin(dodgeDirection))
-							dir = dodgeVec.Scaled(3)
+							dir = dodgeVec.Scaled(2)
 						}
 					}
 				}
@@ -1023,6 +1081,29 @@ func run() {
 
 			game.grid.Update()
 
+			for pID, p := range game.data.particles {
+				if p != (particle{}) {
+					p.origin = p.origin.Add(p.velocity)
+					p.orientation = p.velocity.Angle()
+
+					p.percentLife -= 1.0 / p.duration
+
+					speed := p.velocity.Len()
+					alpha := math.Min(1, math.Min(p.percentLife*2, speed*1.0))
+					alpha *= alpha
+					p.colour.A = alpha
+					p.scale.X = p.lengthMultiplier * math.Min(math.Min(1.0, 0.2*speed+0.1), alpha)
+
+					if math.Abs(p.velocity.X)+math.Abs(p.velocity.Y) < 0.00000001 {
+						p.velocity = pixel.ZV
+					}
+
+					p.velocity = p.velocity.Scaled(0.97)
+
+					game.data.particles[pID] = p
+				}
+			}
+
 			// Apply velocities
 			player.origin = player.origin.Add(player.velocity.Scaled(dt))
 
@@ -1062,6 +1143,31 @@ func run() {
 						if e.alive && b.data.Circle().Intersect(e.Circle()).Radius > 0 {
 							b.data.alive = false
 							game.data.bullets[bID] = b
+
+							// Draw particles
+							hue1 := rand.Float64() * 6.0
+							hue2 := hue1 + math.Mod(rand.Float64()*0.3, 0.3)
+							for i := 0; i < 120; i++ {
+								speed := 18 * (1.0 - (1.0 / (rand.Float64() * 10.0)))
+								t := rand.Float64()
+								hue := (hue1 * (1.0 - t)) + (hue2 * t)
+
+								v := pixel.V((rand.Float64()*speed)-(speed/2), (rand.Float64()*speed)-(speed/2))
+
+								p := NewParticle(
+									e.origin.X,
+									e.origin.Y,
+									HSVToColor(hue, 0.5, 1.0),
+									64,
+									pixel.V(1.5, 1.5),
+									0.0,
+									v,
+									1.8,
+									"enemy",
+								)
+
+								game.data.particles = append(game.data.particles, p)
+							}
 
 							e.hp -= 1
 							if e.hp <= 0 {
@@ -1149,6 +1255,15 @@ func run() {
 					game.data.entities[eID] = e
 				}
 			}
+
+			// kill particles
+			newParticles := make([]particle, 0, 500)
+			for _, p := range game.data.particles {
+				if p.percentLife > 0 {
+					newParticles = append(newParticles, p)
+				}
+			}
+			game.data.particles = newParticles
 
 			// kill entities
 			newEntities := make([]entityData, 0, 100)
@@ -1365,6 +1480,7 @@ func run() {
 
 		if game.state == "playing" {
 
+			// Draw the grid effect
 			// TODO, extract?
 			// Add catmullrom splines?
 			{
@@ -1431,6 +1547,21 @@ func run() {
 							}
 						}
 					}
+				}
+			}
+
+			// draw particles
+			for _, p := range game.data.particles {
+				particleDraw.Clear()
+				if p != (particle{}) {
+					defaultSize := pixel.V(8, 2)
+					pModel := defaultSize.ScaledXY(p.scale)
+					particleDraw.Color = p.colour
+					particleDraw.SetColorMask(pixel.RGBA{1.0, 1.0, 1.0, p.colour.A})
+					particleDraw.SetMatrix(pixel.IM.Rotated(pixel.ZV, p.orientation).Moved(p.origin))
+					particleDraw.Push(pixel.V(-pModel.X/2, 0.0), pixel.V(pModel.X/2, 0.0))
+					particleDraw.Line(pModel.Y)
+					particleDraw.Draw(imd)
 				}
 			}
 
