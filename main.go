@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image/color"
 	_ "image/png"
+	"io/ioutil"
 	"math"
 	"math/rand"
 	"time"
@@ -716,6 +717,14 @@ func (p *entityData) enforceWorldBoundary() { // this code seems dumb, TODO: fin
 	}
 }
 
+func loadFileToString(filename string) (string, error) {
+	b, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
 func init() {
 	rand.Seed(time.Now().Unix())
 }
@@ -760,6 +769,21 @@ func run() {
 	mapRect.Rectangle(4)
 
 	canvas := pixelgl.NewCanvas(pixel.R(-cfg.Bounds.W()/2, -cfg.Bounds.H()/2, cfg.Bounds.W()/2, cfg.Bounds.H()/2))
+
+	bloom1 := pixelgl.NewCanvas(pixel.R(-cfg.Bounds.W()/2, -cfg.Bounds.H()/2, cfg.Bounds.W()/2, cfg.Bounds.H()/2))
+	extractBrightness, err := loadFileToString("./shaders/extract_bright_areas.glsl")
+	if err != nil {
+		panic(err)
+	}
+	bloom1.SetFragmentShader(extractBrightness)
+
+	bloom2 := pixelgl.NewCanvas(pixel.R(-cfg.Bounds.W()/2, -cfg.Bounds.H()/2, cfg.Bounds.W()/2, cfg.Bounds.H()/2))
+	blur, err := loadFileToString("./shaders/blur.glsl")
+	if err != nil {
+		panic(err)
+	}
+	bloom2.SetFragmentShader(blur)
+
 	imd := imdraw.New(nil)
 	playerDraw := imdraw.New(nil)
 	bulletDraw := imdraw.New(nil)
@@ -1155,7 +1179,7 @@ func run() {
 								hue1 := rand.Float64() * 6.0
 								hue2 := math.Mod(hue1+rand.Float64()*1.5, 6.0)
 								for i := 0; i < 120; i++ {
-									speed := 18 * (1.0 - (1.0 / ((rand.Float64() * 10.0) + 1.0)))
+									speed := 24 * (1.0 - (1.0 / ((rand.Float64() * 10.0) + 1.0)))
 									t := rand.Float64()
 									hue := (hue1 * (1.0 - t)) + (hue2 * t)
 
@@ -1562,7 +1586,6 @@ func run() {
 
 		// draw
 		imd.Clear()
-
 		if game.state == "playing" {
 
 			// Draw the grid effect
@@ -1683,10 +1706,10 @@ func run() {
 						tmpTarget.SetMatrix(pixel.IM.Rotated(e.origin, e.target.Angle()))
 						weight := 2.0
 						if e.entityType == "follower" {
-							tmpTarget.Color = colornames.Lightskyblue
+							tmpTarget.Color = colornames.Deepskyblue
 						} else if e.entityType == "pink" || e.entityType == "pinkpleb" {
 							weight = 4.0
-							tmpTarget.Color = colornames.Lightpink
+							tmpTarget.Color = colornames.Hotpink
 						} else if e.entityType == "dodger" {
 							weight = 4.0
 							tmpTarget.Color = colornames.Limegreen
@@ -1704,7 +1727,7 @@ func run() {
 				}
 			}
 
-			bulletDraw.Color = colornames.Lightgoldenrodyellow
+			bulletDraw.Color = pixel.ToRGBA(color.RGBA{255, 192, 128, 255})
 			for _, b := range game.data.bullets {
 				if b.data.alive {
 					bulletDraw.Clear()
@@ -1716,8 +1739,13 @@ func run() {
 		}
 
 		canvas.Clear(colornames.Black)
-		mapRect.Draw(canvas)
 		imd.Draw(canvas)
+		mapRect.Draw(canvas)
+
+		bloom1.Clear(colornames.Black)
+		bloom2.Clear(colornames.Black)
+		canvas.Draw(bloom1, pixel.IM.Moved(canvas.Bounds().Center()))
+		bloom1.Draw(bloom2, pixel.IM.Moved(canvas.Bounds().Center()))
 
 		if game.state == "playing" {
 			for _, e := range game.data.entities {
@@ -1743,13 +1771,16 @@ func run() {
 		}
 
 		// stretch the canvas to the window
-		win.Clear(colornames.White)
+		win.Clear(colornames.Black)
 		win.SetMatrix(pixel.IM.ScaledXY(pixel.ZV,
 			pixel.V(
-				win.Bounds().W()/canvas.Bounds().W(),
-				win.Bounds().H()/canvas.Bounds().H(),
+				win.Bounds().W()/bloom2.Bounds().W(),
+				win.Bounds().H()/bloom2.Bounds().H(),
 			),
 		).Moved(win.Bounds().Center()))
+
+		win.SetComposeMethod(pixel.ComposePlus)
+		bloom2.Draw(win, pixel.IM.Moved(bloom2.Bounds().Center()))
 		canvas.Draw(win, pixel.IM.Moved(canvas.Bounds().Center()))
 
 		if game.state == "playing" {
