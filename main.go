@@ -375,11 +375,21 @@ type entityData struct {
 
 	// sounds
 	spawnSound *beep.Buffer
+	volume     float64
 
 	// enemy data
 	bounty       int
 	bountyText   string
 	killedPlayer bool
+}
+
+func (e *entityData) SpawnSound() beep.Streamer {
+	return &effects.Volume{
+		Streamer: e.spawnSound.Streamer(0, e.spawnSound.Len()),
+		Base:     10,
+		Volume:   e.volume,
+		Silent:   false,
+	}
 }
 
 type bullet struct {
@@ -396,6 +406,7 @@ func NewEntity(x float64, y float64, size float64, speed float64, entityType str
 	p.hp = 1
 	p.alive = true
 	p.entityType = entityType
+	p.volume = 0.0
 	p.born = time.Now()
 	p.text = text.New(pixel.V(0, 0), basicFont)
 	return p
@@ -405,6 +416,7 @@ func NewFollower(x float64, y float64) *entityData {
 	e := NewEntity(x, y, 50.0, 240, "follower")
 	e.target = pixel.V(1.0, 1.0)
 	e.spawnSound = spawnBuffer
+	e.volume = -0.3
 	e.bounty = 50
 	return e
 }
@@ -412,6 +424,7 @@ func NewFollower(x float64, y float64) *entityData {
 func NewWanderer(x float64, y float64) *entityData {
 	w := NewEntity(x, y, 40.0, 100, "wanderer")
 	w.spawnSound = spawnBuffer4
+	w.volume = -0.4
 	w.bounty = 25
 	return w
 }
@@ -440,6 +453,8 @@ func NewPinkPleb(x float64, y float64) *entityData {
 func NewBlackHole(x float64, y float64) *entityData {
 	b := NewEntity(x, y, 75.0, 0.0, "blackhole")
 	b.bounty = 150
+	b.spawnSound = spawnBuffer3
+	b.volume = -0.6
 	b.hp = 10
 	return b
 }
@@ -1430,7 +1445,7 @@ func run() {
 
 					var enemy entityData
 					r := rand.Float64()
-					if r < 0.4 {
+					if r < 0.5 {
 						enemy = *NewFollower(
 							pos.X,
 							pos.Y,
@@ -1444,7 +1459,7 @@ func run() {
 						)
 						// spawnSound := enemy.spawnSound.Streamer(0, enemy.spawnSound.Len())
 						// speaker.Play(spawnSound)
-					} else if r < 0.9 {
+					} else if r < 0.7 {
 						enemy = *NewPinkSquare(
 							pos.X,
 							pos.Y,
@@ -1482,15 +1497,7 @@ func run() {
 						continue
 					}
 					playback[e.entityType] = true
-
-					spawnSound := e.spawnSound.Streamer(0, e.spawnSound.Len())
-					volume := &effects.Volume{
-						Streamer: spawnSound,
-						Base:     10,
-						Volume:   -0.6,
-						Silent:   false,
-					}
-					speaker.Play(volume)
+					speaker.Play(e.SpawnSound())
 				}
 				game.data.entities = append(game.data.entities, spawns...)
 				game.data.spawns += 1
