@@ -817,9 +817,11 @@ func run() {
 	drawShip(playerDraw)
 	playMusic()
 
+	totalTime := 0.0
 	for !win.Closed() {
 		// update
 		dt := time.Since(last).Seconds()
+		totalTime += dt
 		last = time.Now()
 
 		player := &game.data.player
@@ -893,6 +895,22 @@ func run() {
 				))
 				player.target = targetDt
 				player.velocity = direction.Unit().Scaled(player.speed)
+
+				// partile stream
+				baseVelocity := targetDt.Unit().Scaled(-1 * player.speed).Scaled(dt)
+				perpVel := pixel.V(baseVelocity.Y, -baseVelocity.X).Scaled(0.3 * math.Sin(totalTime*10))
+				sideColor := pixel.ToRGBA(color.RGBA{200, 128, 9, 192})
+				midColor := pixel.ToRGBA(color.RGBA{255, 187, 30, 192})
+				pos := player.origin
+
+				vel1 := baseVelocity.Add(perpVel).Add(randomVector((0.3)))
+				vel2 := baseVelocity.Sub(perpVel).Add(randomVector((0.3)))
+				game.data.particles = append(
+					game.data.particles,
+					NewParticle(pos.X, pos.Y, midColor, 32.0, pixel.V(0.5, 1.0), 0.0, baseVelocity, 1.0, "ship"),
+					NewParticle(pos.X, pos.Y, sideColor, 24.0, pixel.V(0.5, 1.0), 0.0, vel1, 1.0, "ship"),
+					NewParticle(pos.X, pos.Y, sideColor, 24.0, pixel.V(0.5, 1.0), 0.0, vel2, 1.0, "ship"),
+				)
 			}
 
 			aim := thumbstickVector(win, currJoystick, pixelgl.AxisRightX, pixelgl.AxisRightY)
