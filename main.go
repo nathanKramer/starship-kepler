@@ -23,7 +23,7 @@ import (
 const maxParticles = 1600
 const worldWidth = 1440.0
 const worldHeight = 1080.0
-const debug = false
+const debug = true
 
 var basicFont *text.Atlas
 
@@ -913,18 +913,21 @@ func run() {
 
 				// partile stream
 				baseVelocity := targetDt.Unit().Scaled(-1 * player.speed).Scaled(dt)
-				perpVel := pixel.V(baseVelocity.Y, -baseVelocity.X).Scaled(0.3 * math.Sin(totalTime*10))
+				perpVel := pixel.V(baseVelocity.Y, -baseVelocity.X).Scaled(0.2 * math.Sin(totalTime*10))
 				sideColor := pixel.ToRGBA(color.RGBA{200, 128, 9, 192})
 				midColor := pixel.ToRGBA(color.RGBA{255, 187, 30, 192})
+				white := pixel.ToRGBA(color.RGBA{255, 224, 192, 192})
 				pos := player.origin
 
-				vel1 := baseVelocity.Add(perpVel).Add(randomVector((0.3)))
-				vel2 := baseVelocity.Sub(perpVel).Add(randomVector((0.3)))
+				vel1 := baseVelocity.Add(perpVel).Add(randomVector((0.2)))
+				vel2 := baseVelocity.Sub(perpVel).Add(randomVector((0.2)))
 				game.data.particles = append(
 					game.data.particles,
 					NewParticle(pos.X, pos.Y, midColor, 32.0, pixel.V(0.5, 1.0), 0.0, baseVelocity, 1.0, "ship"),
-					NewParticle(pos.X, pos.Y, sideColor, 24.0, pixel.V(0.5, 1.0), 0.0, vel1, 1.0, "ship"),
-					NewParticle(pos.X, pos.Y, sideColor, 24.0, pixel.V(0.5, 1.0), 0.0, vel2, 1.0, "ship"),
+					NewParticle(pos.X, pos.Y, sideColor, 32.0, pixel.V(1.0, 1.0), 0.0, vel1.Scaled(1.5), 1.0, "ship"),
+					NewParticle(pos.X, pos.Y, sideColor, 32.0, pixel.V(1.0, 1.0), 0.0, vel2.Scaled(1.5), 1.0, "ship"),
+					NewParticle(pos.X, pos.Y, white, 24.0, pixel.V(0.5, 1.0), 0.0, vel1, 1.0, "ship"),
+					NewParticle(pos.X, pos.Y, white, 24.0, pixel.V(0.5, 1.0), 0.0, vel2, 1.0, "ship"),
 				)
 			}
 
@@ -1040,6 +1043,7 @@ func run() {
 				} else if e.entityType == "dodger" {
 					// https://gamedev.stackexchange.com/questions/109513/how-to-find-if-an-object-is-facing-another-object-given-position-and-direction-a
 					// todo, tidy up and put somewhere
+					e.target = player.origin
 					currentlyDodgingDist := -1.0
 					for _, b := range game.data.bullets {
 						if (b == bullet{}) || !b.data.alive {
@@ -1057,18 +1061,21 @@ func run() {
 							currentlyDodgingDist = entToBullet.Len()
 
 							rad := math.Atan2(entToBullet.Unit().Y, entToBullet.Unit().X)
-							dodge1 := rad + (90 * (2 * math.Pi) / 360)
-							dodge2 := rad - (90 * (2 * math.Pi) / 360)
+							dodge1 := rad + (90 * math.Pi / 180)
+							dodge2 := rad - (90 * math.Pi / 180)
 							dodge1Worth := math.Abs(b.data.target.Unit().Angle() - dodge1)
 							dodge2Worth := math.Abs(b.data.target.Unit().Angle() - dodge2)
 							dodgeDirection := dodge1
 							if dodge2Worth > dodge1Worth {
 								dodgeDirection = dodge2
 							}
+
 							dodgeVec := pixel.V(math.Cos(dodgeDirection), math.Sin(dodgeDirection))
 							dir = dodgeVec.Scaled(2)
 						}
 					}
+				} else if e.entityType == "pink" {
+					e.target = player.origin
 				}
 				e.velocity = dir.Scaled(e.speed)
 				game.data.entities[i] = e
@@ -1097,11 +1104,11 @@ func run() {
 
 				dist := player.origin.Sub(b.origin)
 				length := dist.Len()
-				if length <= 250.0 {
+				if length <= 300.0 {
 					force := pixel.Lerp(
 						dist.Scaled(maxForce),
 						pixel.ZV,
-						length/250.0,
+						length/300.0,
 					)
 					player.velocity = player.velocity.Sub(force)
 				}
@@ -1127,7 +1134,7 @@ func run() {
 					if bul.data.alive {
 						dist := bul.data.origin.Sub(b.origin)
 						length := dist.Len()
-						if length > 250.0 {
+						if length > 300.0 {
 							continue
 						}
 						bul.velocity = bul.velocity.Add(dist.Scaled(0.2))
@@ -1139,18 +1146,25 @@ func run() {
 					if e.alive && eID != bID {
 						dist := b.origin.Sub(e.origin)
 						length := dist.Len()
-						if length > 250.0 {
+						if length > 300.0 {
 							continue
 						}
+
+						n := dist.Unit()
+
 						force := pixel.Lerp(
 							dist.Scaled(maxForce),
 							pixel.ZV,
-							length/250.0,
+							length/300.0,
 						)
+						if e.entityType == "blackhole" && length < 200 {
+							force = (pixel.Vec{n.Y, -n.X}.Scaled(200)).Add(force.Scaled(-1))
+						}
+
 						e.velocity = e.velocity.Add(force)
 
 						intersection := pixel.C(b.origin, b.radius+8.0).Intersect(e.Circle())
-						if intersection.Radius > 0 {
+						if intersection.Radius > 5.0 {
 							e.alive = false
 						}
 						game.data.entities[eID] = e
@@ -1210,11 +1224,12 @@ func run() {
 
 								// Draw particles
 								hue1 := rand.Float64() * 6.0
-								hue2 := math.Mod(hue1+rand.Float64()*1.5, 6.0)
+								hue2 := math.Mod(hue1+(rand.Float64()*1.5), 6.0)
 								for i := 0; i < 120; i++ {
 									speed := 24 * (1.0 - (1.0 / ((rand.Float64() * 10.0) + 1.0)))
 									t := rand.Float64()
-									hue := (hue1 * (1.0 - t)) + (hue2 * t)
+									diff := math.Abs(hue1 - hue2)
+									hue := hue1 + (diff * t)
 
 									p := NewParticle(
 										e.origin.X,
@@ -1256,10 +1271,10 @@ func run() {
 								// still alive
 								// if black hole, emit sound particles to indicate damage
 								if e.entityType == "blackhole" {
-									hue1 := 1.0
+									hue1 := rand.Float64() * 6.0
 									hue2 := hue1 + (rand.Float64() * 0.5) - 0.25
-									for i := 0; i < 32; i++ {
-										speed := 16 * (1.0 - (1.0 / ((rand.Float64() * 8.0) + 1.0)))
+									for i := 0; i < 64; i++ {
+										speed := 32 * (1.0 - (1.0 / ((rand.Float64() * 10.0) + 1.0)))
 										t := rand.Float64()
 										hue := (hue1 * (1.0 - t)) + (hue2 * t)
 
@@ -1271,7 +1286,7 @@ func run() {
 											pixel.V(1.0, 1.0),
 											0.0,
 											randomVector(speed),
-											1.0,
+											3.0,
 											"enemy",
 										)
 
@@ -1426,9 +1441,90 @@ func run() {
 			game.data.bullets = newBullets
 
 			// spawn entities
+			// This is a long procedure to allow spawning enemies for test purposes
+			if debug {
+				scaledX := (win.MousePosition().X - (win.Bounds().W() / 2)) * (canvas.Bounds().W() / win.Bounds().W())
+				scaledY := (win.MousePosition().Y - (win.Bounds().H() / 2)) * (canvas.Bounds().H() / win.Bounds().H())
+				mp := pixel.V(scaledX, scaledY).Add(camPos)
+
+				if win.JustPressed(pixelgl.KeyJ) {
+					enemy := *NewWanderer(
+						mp.X,
+						mp.Y,
+					)
+					game.data.entities = append(game.data.entities, enemy)
+				}
+				if win.JustPressed(pixelgl.KeyK) {
+					enemy := *NewFollower(
+						mp.X,
+						mp.Y,
+					)
+					game.data.entities = append(game.data.entities, enemy)
+				}
+				if win.JustPressed(pixelgl.KeyL) {
+					enemy := *NewDodger(
+						mp.X,
+						mp.Y,
+					)
+					game.data.entities = append(game.data.entities, enemy)
+				}
+				if win.JustPressed(pixelgl.KeySemicolon) {
+					enemy := *NewPinkSquare(
+						mp.X,
+						mp.Y,
+					)
+					game.data.entities = append(game.data.entities, enemy)
+				}
+				if win.JustPressed(pixelgl.KeyApostrophe) {
+					enemy := *NewBlackHole(
+						mp.X,
+						mp.Y,
+					)
+					game.data.entities = append(game.data.entities, enemy)
+				}
+
+				total := 16.0
+				step := 360.0 / total
+				if win.JustPressed(pixelgl.KeyN) {
+					for i := 0.0; i < total; i++ {
+						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+						enemy := *NewWanderer(spawnPos.X, spawnPos.Y)
+						game.data.entities = append(game.data.entities, enemy)
+					}
+				}
+				if win.JustPressed(pixelgl.KeyM) {
+					for i := 0.0; i < total; i++ {
+						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+						enemy := *NewFollower(spawnPos.X, spawnPos.Y)
+						game.data.entities = append(game.data.entities, enemy)
+					}
+				}
+				if win.JustPressed(pixelgl.KeyComma) {
+					for i := 0.0; i < total; i++ {
+						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+						enemy := *NewDodger(spawnPos.X, spawnPos.Y)
+						game.data.entities = append(game.data.entities, enemy)
+					}
+				}
+				if win.JustPressed(pixelgl.KeyPeriod) {
+					for i := 0.0; i < total; i++ {
+						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+						enemy := *NewPinkSquare(spawnPos.X, spawnPos.Y)
+						game.data.entities = append(game.data.entities, enemy)
+					}
+				}
+				if win.JustPressed(pixelgl.KeySlash) {
+					for i := 0.0; i < total; i++ {
+						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+						enemy := *NewBlackHole(spawnPos.X, spawnPos.Y)
+						game.data.entities = append(game.data.entities, enemy)
+					}
+				}
+
+			}
 
 			// ambient spawns
-			if last.Sub(game.data.lastSpawn).Seconds() > game.data.spawnFreq && game.data.spawning {
+			if !debug && last.Sub(game.data.lastSpawn).Seconds() > game.data.spawnFreq && game.data.spawning {
 				// spawn
 				spawns := make([]entityData, 0, game.data.spawnCount)
 				for i := 0; i < game.data.spawnCount; i++ {
@@ -1721,7 +1817,7 @@ func run() {
 					if e.entityType == "wanderer" {
 						imd.Color = colornames.Purple
 						imd.Push(e.origin)
-						imd.Circle(20, 2)
+						imd.Circle(e.radius, 2)
 					} else if e.entityType == "blackhole" {
 						imd.Color = colornames.Red
 						imd.Push(e.origin)
