@@ -23,7 +23,7 @@ import (
 const maxParticles = 1600
 const worldWidth = 1440.0
 const worldHeight = 1080.0
-const debug = true
+const debug = false
 
 var basicFont *text.Atlas
 
@@ -365,6 +365,8 @@ type entityData struct {
 	velocity   pixel.Vec
 	speed      float64
 	radius     float64
+	spawnTime  float64
+	spawning   bool
 	born       time.Time
 	death      time.Time
 	expiry     time.Time
@@ -381,6 +383,9 @@ type entityData struct {
 	bounty       int
 	bountyText   string
 	killedPlayer bool
+
+	// blackholes
+	active bool
 }
 
 func (e *entityData) SpawnSound() beep.Streamer {
@@ -389,6 +394,128 @@ func (e *entityData) SpawnSound() beep.Streamer {
 		Base:     10,
 		Volume:   e.volume,
 		Silent:   false,
+	}
+}
+
+func (e *entityData) DealDamage(eID int, amount int, currTime time.Time, game *game, entsToAdd []entityData) []entityData {
+	e.hp -= amount
+	if e.hp <= 0 {
+		e.alive = false
+		e.death = currTime
+		e.expiry = currTime.Add(time.Millisecond * 300)
+		reward := e.bounty * game.data.scoreMultiplier
+		e.bountyText = fmt.Sprintf("%d", reward)
+		game.data.entities[eID] = *e
+		// Draw particles
+		hue1 := rand.Float64() * 6.0
+		hue2 := math.Mod(hue1+(rand.Float64()*1.5), 6.0)
+		for i := 0; i < 120; i++ {
+			speed := 24 * (1.0 - (1.0 / ((rand.Float64() * 10.0) + 1.0)))
+			t := rand.Float64()
+			diff := math.Abs(hue1 - hue2)
+			hue := hue1 + (diff * t)
+
+			p := NewParticle(
+				e.origin.X,
+				e.origin.Y,
+				HSVToColor(hue, 0.5, 1.0),
+				64,
+				pixel.V(1.5, 1.5),
+				0.0,
+				randomVector(speed),
+				1.8,
+				"enemy",
+			)
+
+			if len(game.data.particles) < maxParticles {
+				game.data.particles = append(game.data.particles, p)
+			} else {
+				game.data.particles[len(game.data.particles)%maxParticles] = p
+			}
+		}
+
+		// on kill
+		if e.entityType == "pink" {
+			// spawn 3 mini plebs
+			for i := 0; i < 3; i++ {
+				pos := pixel.V(
+					rand.Float64()*100,
+					rand.Float64()*100,
+				).Add(e.origin)
+				pleb := *NewPinkPleb(pos.X, pos.Y)
+				entsToAdd = append(entsToAdd, pleb)
+			}
+			// spawnSound := entsToAdd[0].spawnSound.Streamer(0, entsToAdd[0].spawnSound.Len())
+			// speaker.Play(spawnSound)
+		} else if e.entityType == "blackhole" {
+			game.grid.ApplyExplosiveForce(1000, Vector3{e.origin.X, e.origin.Y, 0.0}, 200)
+			// damage surrounding entities and push them back
+			for entID, ent := range game.data.entities {
+				if eID == entID || !ent.alive || ent.spawning {
+					continue
+				}
+				dirV := e.origin.Sub(ent.origin)
+				dist := dirV.Len()
+				if dist < 150 {
+					ent.DealDamage(entID, 4, currTime, game, entsToAdd)
+					game.data.entities[entID] = ent
+				}
+				if dist < 250 {
+					ent.velocity = ent.velocity.Add(dirV)
+				}
+				game.data.entities[entID] = ent
+			}
+		}
+
+		game.data.score += reward
+		game.data.scoreSinceBorn += reward
+		game.data.killsSinceBorn += 1
+	} else {
+		// still alive
+		// if black hole, emit sound particles to indicate damage
+		if e.entityType == "blackhole" {
+			game.grid.ApplyExplosiveForce(e.radius*8, Vector3{e.origin.X, e.origin.Y, 0.0}, e.radius*4)
+			e.active = true
+
+			hue1 := rand.Float64() * 6.0
+			hue2 := math.Mod(hue1+(rand.Float64()*1.5), 6.0)
+			for i := 0; i < 64; i++ {
+				speed := 32 * (1.0 - (1.0 / ((rand.Float64() * 10.0) + 1.0)))
+				t := rand.Float64()
+				diff := math.Abs(hue1 - hue2)
+				hue := hue1 + (diff * t)
+
+				p := NewParticle(
+					e.origin.X,
+					e.origin.Y,
+					HSVToColor(hue, 0.5, 1.0),
+					64,
+					pixel.V(1.0, 1.0),
+					0.0,
+					randomVector(speed),
+					3.0,
+					"enemy",
+				)
+
+				game.data.particles = append(game.data.particles, p)
+			}
+		}
+	}
+
+	return entsToAdd
+}
+
+func (e *entityData) Update(dt float64, totalT float64, currTime time.Time) {
+	e.origin = e.origin.Add(e.velocity.Scaled(dt))
+	e.enforceWorldBoundary()
+	if e.entityType == "blackhole" {
+		volatility := 0.0
+		if e.active {
+			heartRate := 0.3 - ((float64(e.hp) / 15.0) * 0.1)
+			volatility = 5 * (math.Mod(totalT, heartRate) / heartRate)
+		}
+
+		e.radius = 24 + (24 * (float64(e.hp) / 10.0)) + volatility
 	}
 }
 
@@ -403,6 +530,8 @@ func NewEntity(x float64, y float64, size float64, speed float64, entityType str
 	p.origin = pixel.V(x, y)
 	p.radius = size / 2.0
 	p.speed = speed
+	p.spawnTime = 0.5
+	p.spawning = true
 	p.hp = 1
 	p.alive = true
 	p.entityType = entityType
@@ -437,7 +566,7 @@ func NewDodger(x float64, y float64) *entityData {
 }
 
 func NewPinkSquare(x float64, y float64) *entityData {
-	w := NewEntity(x, y, 50.0, 260, "pink")
+	w := NewEntity(x, y, 50.0, 320, "pink")
 	w.spawnSound = spawnBuffer5
 	w.bounty = 100
 	return w
@@ -446,6 +575,8 @@ func NewPinkSquare(x float64, y float64) *entityData {
 func NewPinkPleb(x float64, y float64) *entityData {
 	w := NewEntity(x, y, 30.0, 220, "pinkpleb")
 	// w.spawnSound = spawnBuffer4
+	w.spawnTime = 0.0
+	w.spawning = false
 	w.bounty = 75
 	return w
 }
@@ -456,6 +587,7 @@ func NewBlackHole(x float64, y float64) *entityData {
 	b.spawnSound = spawnBuffer3
 	b.volume = -0.6
 	b.hp = 10
+	b.active = false // dormant until activation (by taking damage)
 	return b
 }
 
@@ -491,11 +623,13 @@ type gamedata struct {
 	spawns          int
 	spawnCount      int
 	scoreSinceBorn  int
+	killsSinceBorn  int
 	player          entityData
 	weapon          weapondata
 	waves           []wavedata
 
 	score             int
+	kills             int
 	lifeReward        int
 	bombReward        int
 	multiplierReward  int
@@ -560,11 +694,13 @@ func NewGameData() *gamedata {
 	gameData.spawns = 0
 	gameData.spawnCount = 1
 	gameData.scoreSinceBorn = 0
+	gameData.killsSinceBorn = 0
 	gameData.weapon = *NewWeaponData()
 
 	gameData.score = 0
-	gameData.multiplierReward = 2000
-	gameData.lifeReward = 100000
+	gameData.kills = 0
+	gameData.multiplierReward = 25 // kills
+	gameData.lifeReward = 75000
 	gameData.bombReward = 100000
 	gameData.waveFreq = 30
 	gameData.weaponUpgradeFreq = 30
@@ -608,11 +744,12 @@ func (data *gamedata) respawnPlayer() {
 	data.player = *NewEntity(0.0, 0.0, 50, 400, "player")
 	data.scoreMultiplier = 1
 	data.scoreSinceBorn = 0
+	data.killsSinceBorn = 0
 }
 
 func (game *game) respawnPlayer() {
 	game.data.respawnPlayer()
-	game.data.multiplierReward = 2000
+	game.data.multiplierReward = 25 // kills
 }
 
 func thumbstickVector(win *pixelgl.Window, joystick pixelgl.Joystick, axisX pixelgl.GamepadAxis, axisY pixelgl.GamepadAxis) pixel.Vec {
@@ -923,7 +1060,7 @@ func run() {
 				vel2 := baseVelocity.Sub(perpVel).Add(randomVector((0.2)))
 				game.data.particles = append(
 					game.data.particles,
-					NewParticle(pos.X, pos.Y, midColor, 32.0, pixel.V(0.5, 1.0), 0.0, baseVelocity, 1.0, "ship"),
+					NewParticle(pos.X, pos.Y, midColor, 48.0, pixel.V(0.5, 1.0), 0.0, baseVelocity, 1.0, "ship"),
 					NewParticle(pos.X, pos.Y, sideColor, 32.0, pixel.V(1.0, 1.0), 0.0, vel1.Scaled(1.5), 1.0, "ship"),
 					NewParticle(pos.X, pos.Y, sideColor, 32.0, pixel.V(1.0, 1.0), 0.0, vel2.Scaled(1.5), 1.0, "ship"),
 					NewParticle(pos.X, pos.Y, white, 24.0, pixel.V(0.5, 1.0), 0.0, vel1, 1.0, "ship"),
@@ -950,26 +1087,27 @@ func run() {
 					// fmt.Printf("Bullet spawned %s", time.Now().String())
 					if game.data.weapon.fireMode == "conic" {
 						rad := math.Atan2(aim.Unit().Y, aim.Unit().X)
-						ang1 := rad + (10 * (2 * math.Pi) / 360)
-						ang2 := rad - (10 * (2 * math.Pi) / 360)
+						ang1 := rad + (8 * math.Pi / 180)
+						ang2 := rad - (8 * math.Pi / 180)
 						ang1Vec := pixel.V(math.Cos(ang1), math.Sin(ang1))
 						ang2Vec := pixel.V(math.Cos(ang2), math.Sin(ang2))
 
 						leftB := NewBullet(
 							player.origin.X,
 							player.origin.Y,
-							1200, ang1Vec,
+							1400, ang1Vec,
 						)
+						m := player.origin.Add(aim.Unit().Scaled(10))
 						b := NewBullet(
-							player.origin.X,
-							player.origin.Y,
-							1200,
+							m.X,
+							m.Y,
+							1400,
 							aim.Unit(),
 						)
 						rightB := NewBullet(
 							player.origin.X,
 							player.origin.Y,
-							1200,
+							1400,
 							ang2Vec,
 						)
 						game.data.bullets = append(game.data.bullets, *leftB, *b, *rightB)
@@ -1031,6 +1169,15 @@ func run() {
 				if !e.alive {
 					continue
 				}
+
+				if e.spawning {
+					if last.Sub(e.born).Seconds() >= e.spawnTime {
+						e.spawning = false
+						game.data.entities[i] = e
+					}
+					continue
+				}
+
 				dir := e.origin.To(player.origin).Unit()
 				if e.entityType == "wanderer" {
 					if e.target.Len() == 0 || e.origin.To(e.target).Len() < 0.2 {
@@ -1095,12 +1242,12 @@ func run() {
 			// Process blackholes
 			// I don't really care about efficiency atm
 			for bID, b := range game.data.entities {
-				if !b.alive || b.entityType != "blackhole" {
+				if !b.alive || b.entityType != "blackhole" || !b.active {
 					continue
 				}
-				maxForce := 2.0
+				maxForce := 0.5
 
-				game.grid.ApplyImplosiveForce(20, Vector3{b.origin.X, b.origin.Y, 0.0}, 150)
+				game.grid.ApplyImplosiveForce(5+b.radius, Vector3{b.origin.X, b.origin.Y, 0.0}, 50+b.radius)
 
 				dist := player.origin.Sub(b.origin)
 				length := dist.Len()
@@ -1125,7 +1272,7 @@ func run() {
 					p.velocity = p.velocity.Add(n.Scaled(10000.0 / ((length * length) + 10000.0)))
 
 					if length < 400 {
-						p.velocity = p.velocity.Add(pixel.Vec{n.Y, -n.X}.Scaled(45 / (length + 250.0)))
+						p.velocity = p.velocity.Add(pixel.V(n.Y, -n.X).Scaled(45 / (length + 250.0)))
 					}
 					game.data.particles[pID] = p
 				}
@@ -1137,13 +1284,22 @@ func run() {
 						if length > 300.0 {
 							continue
 						}
-						bul.velocity = bul.velocity.Add(dist.Scaled(0.2))
+						n := dist.Unit()
+						// bul.velocity = bul.velocity.Add(dist.Scaled(0.2))
+						push1 := bul.velocity.Add(pixel.V(n.Y, -n.X).Scaled(length * 0.2))
+						push2 := bul.velocity.Add(pixel.V(-n.Y, n.X).Scaled(length * 0.2))
+
+						pushed := push1
+						if bul.data.origin.Add(push2).Sub(b.origin).Len() > bul.data.origin.Add(push1).Sub(b.origin).Len() {
+							pushed = push2
+						}
+						bul.velocity = pushed // either way rather than 1 way!
 						game.data.bullets[bulletID] = bul
 					}
 				}
 
 				for eID, e := range game.data.entities {
-					if e.alive && eID != bID {
+					if e.alive && !e.spawning && eID != bID {
 						dist := b.origin.Sub(e.origin)
 						length := dist.Len()
 						if length > 300.0 {
@@ -1156,20 +1312,22 @@ func run() {
 							dist.Scaled(maxForce),
 							pixel.ZV,
 							length/300.0,
-						)
-						if e.entityType == "blackhole" && length < 200 {
-							force = (pixel.Vec{n.Y, -n.X}.Scaled(200)).Add(force.Scaled(-1))
-						}
+						).Scaled(1.0 / float64(e.hp) * float64(b.hp))
+						force = force.Add(pixel.V(n.Y, -n.X).Scaled(force.Len()))
 
 						e.velocity = e.velocity.Add(force)
 
 						intersection := pixel.C(b.origin, b.radius+8.0).Intersect(e.Circle())
-						if intersection.Radius > 5.0 {
+						if intersection.Radius > 5.0 && e.entityType != "blackhole" {
+							b.hp += e.hp // Blackhole grows stronger
+							b.bounty += e.bounty
 							e.alive = false
 						}
 						game.data.entities[eID] = e
 					}
 				}
+
+				game.data.entities[bID] = b
 			}
 
 			game.grid.Update()
@@ -1178,12 +1336,11 @@ func run() {
 			player.origin = player.origin.Add(player.velocity.Scaled(dt))
 
 			for i, e := range game.data.entities {
-				if !e.alive {
+				if !e.alive && !e.spawning {
 					continue
 				}
 
-				e.origin = e.origin.Add(e.velocity.Scaled(dt))
-				e.enforceWorldBoundary()
+				e.Update(dt, totalTime, last)
 				game.data.entities[i] = e
 			}
 
@@ -1210,91 +1367,12 @@ func run() {
 			for bID, b := range game.data.bullets {
 				if b.data.alive {
 					for eID, e := range game.data.entities {
-						if e.alive && b.data.Circle().Intersect(e.Circle()).Radius > 0 {
+						if e.alive && !e.spawning && b.data.Circle().Intersect(e.Circle()).Radius > 0 {
 							b.data.alive = false
 							game.data.bullets[bID] = b
 
-							e.hp -= 1
-							if e.hp <= 0 {
-								e.alive = false
-								e.death = last
-								e.expiry = last.Add(time.Millisecond * 300)
-								reward := e.bounty * game.data.scoreMultiplier
-								e.bountyText = fmt.Sprintf("%d", reward)
+							entsToAdd = e.DealDamage(eID, 1, last, game, entsToAdd)
 
-								// Draw particles
-								hue1 := rand.Float64() * 6.0
-								hue2 := math.Mod(hue1+(rand.Float64()*1.5), 6.0)
-								for i := 0; i < 120; i++ {
-									speed := 24 * (1.0 - (1.0 / ((rand.Float64() * 10.0) + 1.0)))
-									t := rand.Float64()
-									diff := math.Abs(hue1 - hue2)
-									hue := hue1 + (diff * t)
-
-									p := NewParticle(
-										e.origin.X,
-										e.origin.Y,
-										HSVToColor(hue, 0.5, 1.0),
-										64,
-										pixel.V(1.5, 1.5),
-										0.0,
-										randomVector(speed),
-										1.8,
-										"enemy",
-									)
-
-									if len(game.data.particles) < maxParticles {
-										game.data.particles = append(game.data.particles, p)
-									} else {
-										game.data.particles[len(game.data.particles)%maxParticles] = p
-									}
-								}
-
-								// on kill
-								if e.entityType == "pink" {
-									// spawn 3 mini plebs
-									for i := 0; i < 3; i++ {
-										pos := pixel.V(
-											rand.Float64()*100,
-											rand.Float64()*100,
-										).Add(e.origin)
-										pleb := *NewPinkPleb(pos.X, pos.Y)
-										entsToAdd = append(entsToAdd, pleb)
-									}
-									// spawnSound := entsToAdd[0].spawnSound.Streamer(0, entsToAdd[0].spawnSound.Len())
-									// speaker.Play(spawnSound)
-								}
-
-								game.data.score += reward
-								game.data.scoreSinceBorn += reward
-							} else {
-								// still alive
-								// if black hole, emit sound particles to indicate damage
-								if e.entityType == "blackhole" {
-									hue1 := rand.Float64() * 6.0
-									hue2 := hue1 + (rand.Float64() * 0.5) - 0.25
-									for i := 0; i < 64; i++ {
-										speed := 32 * (1.0 - (1.0 / ((rand.Float64() * 10.0) + 1.0)))
-										t := rand.Float64()
-										hue := (hue1 * (1.0 - t)) + (hue2 * t)
-
-										p := NewParticle(
-											e.origin.X,
-											e.origin.Y,
-											HSVToColor(hue, 0.5, 1.0),
-											64,
-											pixel.V(1.0, 1.0),
-											0.0,
-											randomVector(speed),
-											3.0,
-											"enemy",
-										)
-
-										game.data.particles = append(game.data.particles, p)
-									}
-
-								}
-							}
 							game.data.entities[eID] = e
 							break
 						}
@@ -1316,7 +1394,7 @@ func run() {
 			game.data.entities = append(game.data.entities, entsToAdd...)
 
 			for eID, e := range game.data.entities {
-				if e.alive && e.Circle().Intersect(player.Circle()).Radius > 0 {
+				if e.alive && !e.spawning && e.Circle().Intersect(player.Circle()).Radius > 0 {
 					e.killedPlayer = true
 					game.data.entities[eID] = e
 					game.data.lives -= 1
@@ -1532,7 +1610,8 @@ func run() {
 						float64(rand.Intn(worldWidth)-worldWidth/2),
 						float64(rand.Intn(worldHeight)-worldHeight/2),
 					)
-					for pos.Sub(player.origin).Len() < 300 {
+					// to regulate distance from player
+					for pos.Sub(player.origin).Len() < 250 {
 						pos = pixel.V(
 							float64(rand.Intn(worldWidth)-worldWidth/2),
 							float64(rand.Intn(worldHeight)-worldHeight/2),
@@ -1656,7 +1735,7 @@ func run() {
 			// adjust game rules
 
 			if game.data.score >= game.data.lifeReward {
-				game.data.lifeReward += 100000
+				game.data.lifeReward += game.data.lifeReward
 				game.data.lives += 1
 				sound := lifeBuffer.Streamer(0, lifeBuffer.Len())
 				volume := &effects.Volume{
@@ -1669,11 +1748,11 @@ func run() {
 			}
 
 			if game.data.score >= game.data.bombReward {
-				game.data.bombReward += 100000
+				game.data.bombReward += game.data.bombReward
 				game.data.bombs += 1
 			}
 
-			if game.data.scoreSinceBorn >= game.data.multiplierReward && game.data.scoreMultiplier < 10 {
+			if game.data.killsSinceBorn >= game.data.multiplierReward && game.data.scoreMultiplier < 10 {
 				game.data.scoreMultiplier += 1
 				game.data.multiplierReward *= 2
 				buffer := multiplierSounds[game.data.scoreMultiplier]
@@ -1733,7 +1812,7 @@ func run() {
 								enforceWorldBoundary(&left)
 								thickness := 1.0
 								if y%3 == 1 {
-									thickness = 2.0
+									thickness = 3.0
 								}
 								imd.Push(left, p)
 								imd.Line(thickness)
@@ -1814,14 +1893,39 @@ func run() {
 			imd.Color = colornames.Lightskyblue
 			for _, e := range game.data.entities {
 				if e.alive {
+					imd.SetColorMask(pixel.Alpha(1))
+					size := e.radius
+					if e.spawning {
+						imd.SetColorMask(pixel.Alpha(0.7))
+						timeSinceBorn := last.Sub(e.born).Seconds()
+						spawnIndicatorT := e.spawnTime / 2.0
+
+						size = e.radius * (math.Mod(timeSinceBorn, spawnIndicatorT) / spawnIndicatorT)
+						if e.entityType == "blackhole" {
+							size = e.radius * ((timeSinceBorn) / e.spawnTime) // grow from small to actual size
+						}
+					}
+
 					if e.entityType == "wanderer" {
 						imd.Color = colornames.Purple
 						imd.Push(e.origin)
-						imd.Circle(e.radius, 2)
+						imd.Circle(size, 2)
 					} else if e.entityType == "blackhole" {
-						imd.Color = colornames.Red
+						baseColor := pixel.ToRGBA(colornames.Red)
+						volatility := 0
+						ringWeight := 3
+
+						if e.active {
+							baseColor = pixel.ToRGBA(colornames.White)
+							volatility = e.hp - 10
+
+							if volatility > 0 {
+								ringWeight += volatility
+							}
+						}
+						imd.Color = baseColor
 						imd.Push(e.origin)
-						imd.Circle(e.radius, 2)
+						imd.Circle(size, float64(ringWeight))
 					} else {
 						tmpTarget.Clear()
 						tmpTarget.SetMatrix(pixel.IM.Rotated(e.origin, e.target.Angle()))
@@ -1835,7 +1939,7 @@ func run() {
 							weight = 4.0
 							tmpTarget.Color = colornames.Limegreen
 						}
-						tmpTarget.Push(pixel.V(e.origin.X-e.radius, e.origin.Y-e.radius), pixel.V(e.origin.X+e.radius, e.origin.Y+e.radius))
+						tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y-size), pixel.V(e.origin.X+size, e.origin.Y+size))
 						tmpTarget.Rectangle(weight)
 						tmpTarget.Draw(imd)
 					}
