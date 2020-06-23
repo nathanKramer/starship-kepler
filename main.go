@@ -360,20 +360,21 @@ func (g *grid) ApplyExplosiveForce(force float64, origin Vector3, radius float64
 
 // For now just using a god entity struct, honestly this is probably fine
 type entityData struct {
-	target     pixel.Vec
-	origin     pixel.Vec
-	velocity   pixel.Vec
-	speed      float64
-	radius     float64
-	spawnTime  float64
-	spawning   bool
-	born       time.Time
-	death      time.Time
-	expiry     time.Time
-	alive      bool
-	entityType string
-	text       *text.Text
-	hp         int
+	target      pixel.Vec // if moving to an arbitrary point, use this
+	orientation pixel.Vec // current rotation
+	origin      pixel.Vec
+	velocity    pixel.Vec
+	speed       float64
+	radius      float64
+	spawnTime   float64
+	spawning    bool
+	born        time.Time
+	death       time.Time
+	expiry      time.Time
+	alive       bool
+	entityType  string
+	text        *text.Text
+	hp          int
 
 	// sounds
 	spawnSound *beep.Buffer
@@ -507,16 +508,10 @@ func (e *entityData) DealDamage(eID int, amount int, currTime time.Time, game *g
 
 func (e *entityData) Update(dt float64, totalT float64, currTime time.Time) {
 	e.origin = e.origin.Add(e.velocity.Scaled(dt))
-	e.enforceWorldBoundary()
 	if e.entityType == "blackhole" {
-		volatility := 0.0
-		if e.active {
-			heartRate := 0.3 - ((float64(e.hp) / 15.0) * 0.1)
-			volatility = 5 * (math.Mod(totalT, heartRate) / heartRate)
-		}
-
-		e.radius = 24 + (24 * (float64(e.hp) / 10.0)) + volatility
+		e.radius = 24 + (24 * (float64(e.hp) / 10.0))
 	}
+	e.enforceWorldBoundary()
 }
 
 type bullet struct {
@@ -527,6 +522,7 @@ type bullet struct {
 func NewEntity(x float64, y float64, size float64, speed float64, entityType string) *entityData {
 	p := new(entityData)
 	p.target = pixel.V(0.0, 1.0)
+	p.orientation = pixel.V(0.0, 1.0)
 	p.origin = pixel.V(x, y)
 	p.radius = size / 2.0
 	p.speed = speed
@@ -543,7 +539,7 @@ func NewEntity(x float64, y float64, size float64, speed float64, entityType str
 
 func NewFollower(x float64, y float64) *entityData {
 	e := NewEntity(x, y, 50.0, 240, "follower")
-	e.target = pixel.V(1.0, 1.0)
+	e.orientation = pixel.V(1.0, 1.0)
 	e.spawnSound = spawnBuffer
 	e.volume = -0.3
 	e.bounty = 50
@@ -551,7 +547,7 @@ func NewFollower(x float64, y float64) *entityData {
 }
 
 func NewWanderer(x float64, y float64) *entityData {
-	w := NewEntity(x, y, 40.0, 100, "wanderer")
+	w := NewEntity(x, y, 50.0, 100, "wanderer")
 	w.spawnSound = spawnBuffer4
 	w.volume = -0.4
 	w.bounty = 25
@@ -595,6 +591,7 @@ func NewBullet(x float64, y float64, speed float64, target pixel.Vec) *bullet {
 	b := new(bullet)
 	b.data = *NewEntity(x, y, 3, speed, "bullet")
 	b.data.target = target
+	b.data.orientation = target
 	b.velocity = target.Scaled(speed)
 	return b
 }
@@ -835,11 +832,11 @@ func withinWorld(v pixel.Vec) bool {
 	return !outOfWorld(v)
 }
 
-func enforceWorldBoundary(v *pixel.Vec) { // this code seems dumb, TODO: find some api call that does it
-	minX := -(worldWidth / 2.0)
-	minY := -(worldHeight / 2.0)
-	maxX := (worldWidth / 2.)
-	maxY := (worldHeight / 2.0)
+func enforceWorldBoundary(v *pixel.Vec, margin float64) { // this code seems dumb, TODO: find some api call that does it
+	minX := -(worldWidth / 2.0) + margin
+	minY := -(worldHeight / 2.0) + margin
+	maxX := (worldWidth / 2.) - margin
+	maxY := (worldHeight / 2.0) - margin
 	if v.X < minX {
 		v.X = minX
 	} else if v.X > maxX {
@@ -1040,16 +1037,16 @@ func run() {
 			}
 
 			if direction.Len() > 0.5 {
-				targetDt := (pixel.Lerp(
-					player.target,
+				orientationDt := (pixel.Lerp(
+					player.orientation,
 					direction,
 					1-math.Pow(1.0/512, dt),
 				))
-				player.target = targetDt
+				player.orientation = orientationDt
 				player.velocity = direction.Unit().Scaled(player.speed)
 
 				// partile stream
-				baseVelocity := targetDt.Unit().Scaled(-1 * player.speed).Scaled(dt)
+				baseVelocity := orientationDt.Unit().Scaled(-1 * player.speed).Scaled(dt)
 				perpVel := pixel.V(baseVelocity.Y, -baseVelocity.X).Scaled(0.2 * math.Sin(totalTime*10))
 				sideColor := pixel.ToRGBA(color.RGBA{200, 128, 9, 192})
 				midColor := pixel.ToRGBA(color.RGBA{255, 187, 30, 192})
@@ -1180,17 +1177,19 @@ func run() {
 
 				dir := e.origin.To(player.origin).Unit()
 				if e.entityType == "wanderer" {
-					if e.target.Len() == 0 || e.origin.To(e.target).Len() < 0.2 {
-						e.target = pixel.V(
-							rand.Float64()*400,
-							rand.Float64()*400,
-						).Add(e.origin)
+					if e.target.Len() == 0 || e.origin.To(e.target).Len() < 5.0 {
+						poi := pixel.V(
+							(rand.Float64()*worldWidth)-worldWidth/2.0,
+							(rand.Float64()*worldHeight)-worldHeight/2.0,
+						)
+						e.target = e.origin.Sub(poi).Unit().Scaled(rand.Float64() * 400)
 					}
+					e.orientation = e.orientation.Rotated(60 * math.Pi / 180 * dt).Unit()
 					dir = e.origin.To(e.target).Unit()
 				} else if e.entityType == "dodger" {
 					// https://gamedev.stackexchange.com/questions/109513/how-to-find-if-an-object-is-facing-another-object-given-position-and-direction-a
 					// todo, tidy up and put somewhere
-					e.target = player.origin
+					e.orientation = player.origin
 					currentlyDodgingDist := -1.0
 					for _, b := range game.data.bullets {
 						if (b == bullet{}) || !b.data.alive {
@@ -1201,7 +1200,7 @@ func run() {
 							continue
 						}
 
-						facing := entToBullet.Dot(b.data.target.Unit())
+						facing := entToBullet.Dot(b.data.orientation.Unit())
 
 						isClosest := (currentlyDodgingDist == -1.0 || entToBullet.Len() < currentlyDodgingDist)
 						if facing > 0.0 && facing > 0.80 && facing < 0.95 && isClosest { // if it's basically dead on, they'll die.
@@ -1210,8 +1209,8 @@ func run() {
 							rad := math.Atan2(entToBullet.Unit().Y, entToBullet.Unit().X)
 							dodge1 := rad + (90 * math.Pi / 180)
 							dodge2 := rad - (90 * math.Pi / 180)
-							dodge1Worth := math.Abs(b.data.target.Unit().Angle() - dodge1)
-							dodge2Worth := math.Abs(b.data.target.Unit().Angle() - dodge2)
+							dodge1Worth := math.Abs(b.data.orientation.Unit().Angle() - dodge1)
+							dodge2Worth := math.Abs(b.data.orientation.Unit().Angle() - dodge2)
 							dodgeDirection := dodge1
 							if dodge2Worth > dodge1Worth {
 								dodgeDirection = dodge2
@@ -1222,7 +1221,7 @@ func run() {
 						}
 					}
 				} else if e.entityType == "pink" {
-					e.target = player.origin
+					e.orientation = player.origin
 				}
 				e.velocity = dir.Scaled(e.speed)
 				game.data.entities[i] = e
@@ -1808,8 +1807,8 @@ func run() {
 							if withinWorld(p) || withinWorld(left) {
 								// It's possible that one but not the other point is brought in from out of the world boundary
 								// If being brought in from out of the world, render right on the border
-								enforceWorldBoundary(&p)
-								enforceWorldBoundary(&left)
+								enforceWorldBoundary(&p, 0.0)
+								enforceWorldBoundary(&left, 0.0)
 								thickness := 1.0
 								if y%3 == 1 {
 									thickness = 3.0
@@ -1823,8 +1822,8 @@ func run() {
 							if withinWorld(p) || withinWorld(up) {
 								// It's possible that one but not the other point is brought in from out of the world boundary
 								// If being brought in from out of the world, render right on the border
-								enforceWorldBoundary(&p)
-								enforceWorldBoundary(&up)
+								enforceWorldBoundary(&p, 0.0)
+								enforceWorldBoundary(&up, 0.0)
 								thickness := 1.0
 								if y%3 == 1 {
 									thickness = 3.0
@@ -1839,8 +1838,8 @@ func run() {
 							p1, p2 := upLeft.Add(up).Scaled(0.5), left.Add(p).Scaled(0.5)
 
 							if withinWorld(p1) || withinWorld(p2) {
-								enforceWorldBoundary(&p1)
-								enforceWorldBoundary(&p2)
+								enforceWorldBoundary(&p1, 0.0)
+								enforceWorldBoundary(&p2, 0.0)
 								imd.Push(p1, p2)
 								imd.Line(1.0)
 							}
@@ -1848,8 +1847,8 @@ func run() {
 							p3, p4 := upLeft.Add(left).Scaled(0.5), up.Add(p).Scaled(0.5)
 
 							if withinWorld(p3) || withinWorld(p4) {
-								enforceWorldBoundary(&p3)
-								enforceWorldBoundary(&p4)
+								enforceWorldBoundary(&p3, 0.0)
+								enforceWorldBoundary(&p4, 0.0)
 								imd.Push(p3, p4)
 								imd.Line(1.0)
 							}
@@ -1882,7 +1881,7 @@ func run() {
 				d.Push(player.origin)
 				d.Circle(player.radius, 2)
 			}
-			d.SetMatrix(pixel.IM.Rotated(pixel.ZV, player.target.Angle()-math.Pi/2).Moved(player.origin))
+			d.SetMatrix(pixel.IM.Rotated(pixel.ZV, player.orientation.Angle()-math.Pi/2).Moved(player.origin))
 			playerDraw.Draw(d)
 			d.Draw(imd)
 
@@ -1907,40 +1906,79 @@ func run() {
 					}
 
 					if e.entityType == "wanderer" {
-						imd.Color = colornames.Purple
-						imd.Push(e.origin)
-						imd.Circle(size, 2)
+						tmpTarget.Clear()
+						tmpTarget.Color = colornames.Mediumpurple
+						baseTransform := pixel.IM.Rotated(pixel.ZV, e.orientation.Angle()).Moved(e.origin)
+						tmpTarget.SetMatrix(baseTransform)
+						tmpTarget.Push(
+							pixel.V(0, size),
+							pixel.V(2, 1).Scaled(size/8),
+							pixel.V(0, size).Rotated(-120.0*math.Pi/180),
+							pixel.V(0, -2.236).Scaled(size/8),
+							pixel.V(0, size).Rotated(120.0*math.Pi/180),
+							pixel.V(-2, 1).Scaled(size/8),
+						)
+						tmpTarget.Polygon(3)
+						tmpTarget.Push(
+							pixel.V(0, size).Rotated(60.0*math.Pi/180),
+							pixel.V(2, 1).Scaled(size/8).Rotated(60.0*math.Pi/180),
+							pixel.V(0, size).Rotated(-120.0*math.Pi/180).Rotated(60.0*math.Pi/180),
+							pixel.V(0, -2.236).Scaled(size/8).Rotated(60.0*math.Pi/180),
+							pixel.V(0, size).Rotated(120.0*math.Pi/180).Rotated(60.0*math.Pi/180),
+							pixel.V(-2, 1).Scaled(size/8).Rotated(60.0*math.Pi/180),
+						)
+						tmpTarget.Polygon(3)
+						tmpTarget.Draw(imd)
 					} else if e.entityType == "blackhole" {
-						baseColor := pixel.ToRGBA(colornames.Red)
-						volatility := 0
-						ringWeight := 3
+						imd.Color = pixel.ToRGBA(colornames.Red)
 
+						imd.Push(e.origin)
+						imd.Circle(size, float64(4))
 						if e.active {
-							baseColor = pixel.ToRGBA(colornames.White)
-							volatility = e.hp - 10
+							heartRate := 0.3 - ((float64(e.hp) / 15.0) * 0.1)
+							volatility := 5 * (math.Mod(totalTime, heartRate) / heartRate)
 
+							size += volatility
+
+							ringWeight := 1.0
 							if volatility > 0 {
 								ringWeight += volatility
 							}
+							imd.Color = pixel.ToRGBA(colornames.White)
+							imd.Push(e.origin)
+							imd.Circle(size, ringWeight)
 						}
-						imd.Color = baseColor
-						imd.Push(e.origin)
-						imd.Circle(size, float64(ringWeight))
 					} else {
 						tmpTarget.Clear()
-						tmpTarget.SetMatrix(pixel.IM.Rotated(e.origin, e.target.Angle()))
+						tmpTarget.SetMatrix(pixel.IM.Rotated(e.origin, e.orientation.Angle()))
 						weight := 2.0
 						if e.entityType == "follower" {
 							tmpTarget.Color = colornames.Deepskyblue
-						} else if e.entityType == "pink" || e.entityType == "pinkpleb" {
+							tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y-size), pixel.V(e.origin.X+size, e.origin.Y+size))
+							tmpTarget.Rectangle(weight)
+						} else if e.entityType == "pink" {
 							weight = 4.0
 							tmpTarget.Color = colornames.Hotpink
+							tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y-size), pixel.V(e.origin.X+size, e.origin.Y+size))
+							tmpTarget.Rectangle(weight)
+							tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y-size), pixel.V(e.origin.X+size, e.origin.Y+size))
+							tmpTarget.Line(weight)
+							tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y+size), pixel.V(e.origin.X+size, e.origin.Y-size))
+							tmpTarget.Line(weight)
+						} else if e.entityType == "pinkpleb" {
+							weight = 3.0
+							tmpTarget.Color = colornames.Hotpink
+							tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y-size), pixel.V(e.origin.X+size, e.origin.Y+size))
+							tmpTarget.Rectangle(weight)
 						} else if e.entityType == "dodger" {
-							weight = 4.0
+							weight = 3.0
 							tmpTarget.Color = colornames.Limegreen
+							tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y-size), pixel.V(e.origin.X+size, e.origin.Y+size))
+							tmpTarget.Rectangle(weight)
+							tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y), pixel.V(e.origin.X, e.origin.Y+size))
+							tmpTarget.Push(pixel.V(e.origin.X+size, e.origin.Y), pixel.V(e.origin.X, e.origin.Y-size))
+							tmpTarget.Polygon(weight)
 						}
-						tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y-size), pixel.V(e.origin.X+size, e.origin.Y+size))
-						tmpTarget.Rectangle(weight)
 						tmpTarget.Draw(imd)
 					}
 
@@ -1956,7 +1994,7 @@ func run() {
 			for _, b := range game.data.bullets {
 				if b.data.alive {
 					bulletDraw.Clear()
-					bulletDraw.SetMatrix(pixel.IM.Rotated(pixel.ZV, b.data.target.Angle()-math.Pi/2).Moved(b.data.origin))
+					bulletDraw.SetMatrix(pixel.IM.Rotated(pixel.ZV, b.data.orientation.Angle()-math.Pi/2).Moved(b.data.origin))
 					drawBullet(&b.data, bulletDraw)
 					bulletDraw.Draw(imd)
 				}
