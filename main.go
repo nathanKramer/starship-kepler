@@ -23,11 +23,16 @@ import (
 const maxParticles = 1600
 const worldWidth = 1440.0
 const worldHeight = 1080.0
-const debug = false
 
 var basicFont *text.Atlas
 
 // Particles
+
+type debugInfo struct {
+	p1   pixel.Vec
+	p2   pixel.Vec
+	text string
+}
 
 type particle struct {
 	origin      pixel.Vec
@@ -360,21 +365,23 @@ func (g *grid) ApplyExplosiveForce(force float64, origin Vector3, radius float64
 
 // For now just using a god entity struct, honestly this is probably fine
 type entityData struct {
-	target      pixel.Vec // if moving to an arbitrary point, use this
-	orientation pixel.Vec // current rotation
-	origin      pixel.Vec
-	velocity    pixel.Vec
-	speed       float64
-	radius      float64
-	spawnTime   float64
-	spawning    bool
-	born        time.Time
-	death       time.Time
-	expiry      time.Time
-	alive       bool
-	entityType  string
-	text        *text.Text
-	hp          int
+	target       pixel.Vec // if moving to an arbitrary point, use this
+	orientation  pixel.Vec // current rotation
+	origin       pixel.Vec
+	velocity     pixel.Vec
+	speed        float64
+	acceleration float64
+	friction     float64
+	radius       float64
+	spawnTime    float64
+	spawning     bool
+	born         time.Time
+	death        time.Time
+	expiry       time.Time
+	alive        bool
+	entityType   string
+	text         *text.Text
+	hp           int
 
 	// sounds
 	spawnSound *beep.Buffer
@@ -506,12 +513,60 @@ func (e *entityData) DealDamage(eID int, amount int, currTime time.Time, game *g
 	return entsToAdd
 }
 
+func (e *entityData) Propel(dir pixel.Vec, dt float64) {
+	e.velocity = e.velocity.Add(dir.Scaled(e.acceleration * (dt * 1000) * e.friction))
+	if e.velocity.Len() > e.speed {
+		e.velocity = e.velocity.Unit().Scaled(e.speed)
+	}
+}
+
 func (e *entityData) Update(dt float64, totalT float64, currTime time.Time) {
+	e.velocity = e.velocity.Scaled(e.friction)
+	if e.velocity.Len() < 0.2 {
+		e.velocity = pixel.ZV
+	}
+
 	e.origin = e.origin.Add(e.velocity.Scaled(dt))
 	if e.entityType == "blackhole" {
-		e.radius = 24 + (24 * (float64(e.hp) / 10.0))
+		e.radius = 20 + (20 * (float64(e.hp) / 10.0))
 	}
 	e.enforceWorldBoundary()
+}
+
+func (e *entityData) DrawDebug(imd *imdraw.IMDraw, canvas *pixelgl.Canvas) {
+	e.text.Clear()
+	e.text.Orig = e.origin
+	e.text.Dot = e.origin
+
+	text := fmt.Sprintf(
+		"pos: [%f,%f]\nvelocity: [%f,%f]\nspeed: %f\nfriction: %f\nacceleration: %f\n",
+		e.origin.X, e.origin.Y, e.velocity.X, e.velocity.Y, e.velocity.Len(), e.friction, e.acceleration,
+	)
+
+	fmt.Fprintf(e.text, "%s", text)
+	e.text.Color = colornames.White
+	e.text.Draw(
+		canvas,
+		pixel.IM.Scaled(e.text.Orig, 1.0).Moved(pixel.V(50, -50)),
+	)
+
+	imd.Color = colornames.Green
+	imd.Push(e.origin)
+	imd.Circle(e.radius, 2)
+
+	imd.Color = colornames.Blue
+	imd.Push(e.origin, e.origin.Add(e.velocity.Scaled(0.5)))
+	imd.Line(3)
+
+	imd.Color = colornames.Yellow
+	imd.Push(e.origin, e.origin.Add(e.orientation.Scaled(50)))
+	imd.Line(3)
+
+	// if e.target != (pixel.Vec{}) {
+	// 	imd.Color = colornames.Orange
+	// 	imd.Push(e.origin, e.origin.Add(e.target))
+	// 	imd.Line(2)
+	// }
 }
 
 type bullet struct {
@@ -526,6 +581,8 @@ func NewEntity(x float64, y float64, size float64, speed float64, entityType str
 	p.origin = pixel.V(x, y)
 	p.radius = size / 2.0
 	p.speed = speed
+	p.acceleration = 1.8
+	p.friction = 0.95
 	p.spawnTime = 0.5
 	p.spawning = true
 	p.hp = 1
@@ -538,7 +595,7 @@ func NewEntity(x float64, y float64, size float64, speed float64, entityType str
 }
 
 func NewFollower(x float64, y float64) *entityData {
-	e := NewEntity(x, y, 50.0, 240, "follower")
+	e := NewEntity(x, y, 50.0, 300, "follower")
 	e.orientation = pixel.V(1.0, 1.0)
 	e.spawnSound = spawnBuffer
 	e.volume = -0.3
@@ -547,29 +604,31 @@ func NewFollower(x float64, y float64) *entityData {
 }
 
 func NewWanderer(x float64, y float64) *entityData {
-	w := NewEntity(x, y, 50.0, 100, "wanderer")
+	w := NewEntity(x, y, 50.0, 200, "wanderer")
 	w.spawnSound = spawnBuffer4
 	w.volume = -0.4
+	w.acceleration = 0.5
 	w.bounty = 25
 	return w
 }
 
 func NewDodger(x float64, y float64) *entityData {
-	w := NewEntity(x, y, 50.0, 240, "dodger")
+	w := NewEntity(x, y, 50.0, 350, "dodger")
 	w.spawnSound = spawnBuffer2
 	w.bounty = 100
 	return w
 }
 
 func NewPinkSquare(x float64, y float64) *entityData {
-	w := NewEntity(x, y, 50.0, 320, "pink")
+	w := NewEntity(x, y, 50.0, 450, "pink")
 	w.spawnSound = spawnBuffer5
+	w.friction = 0.98
 	w.bounty = 100
 	return w
 }
 
 func NewPinkPleb(x float64, y float64) *entityData {
-	w := NewEntity(x, y, 30.0, 220, "pinkpleb")
+	w := NewEntity(x, y, 30.0, 200, "pinkpleb")
 	// w.spawnSound = spawnBuffer4
 	w.spawnTime = 0.0
 	w.spawning = false
@@ -578,7 +637,7 @@ func NewPinkPleb(x float64, y float64) *entityData {
 }
 
 func NewBlackHole(x float64, y float64) *entityData {
-	b := NewEntity(x, y, 75.0, 0.0, "blackhole")
+	b := NewEntity(x, y, 40.0, 0.0, "blackhole")
 	b.bounty = 150
 	b.spawnSound = spawnBuffer3
 	b.volume = -0.6
@@ -687,7 +746,7 @@ func NewGameData() *gamedata {
 	gameData.entities = make([]entityData, 0, 100)
 	gameData.bullets = make([]bullet, 0, 100)
 	gameData.particles = make([]particle, 0, maxParticles)
-	gameData.player = *NewEntity(0.0, 0.0, 50, 400, "player")
+	gameData.player = *NewEntity(0.0, 0.0, 50, 500, "player")
 	gameData.spawns = 0
 	gameData.spawnCount = 1
 	gameData.scoreSinceBorn = 0
@@ -738,7 +797,7 @@ func NewGame() *game {
 func (data *gamedata) respawnPlayer() {
 	data.entities = make([]entityData, 0, 100)
 	data.bullets = make([]bullet, 0, 100)
-	data.player = *NewEntity(0.0, 0.0, 50, 400, "player")
+	data.player = *NewEntity(0.0, 0.0, 50, 500, "player")
 	data.scoreMultiplier = 1
 	data.scoreSinceBorn = 0
 	data.killsSinceBorn = 0
@@ -890,7 +949,7 @@ func run() {
 		Maximized: true,
 		VSync:     true,
 	}
-
+	debug := true
 	if debug {
 		cfg.Bounds = pixel.R(0, 0, 1024, 768)
 		cfg.Maximized = false
@@ -966,12 +1025,18 @@ func run() {
 	drawShip(playerDraw)
 	playMusic()
 
+	debugInfos := []debugInfo{}
 	totalTime := 0.0
+	timeScale := 1.0
 	for !win.Closed() {
 		// update
-		dt := time.Since(last).Seconds()
+		dt := time.Since(last).Seconds() * timeScale
 		totalTime += dt
 		last = time.Now()
+
+		if debug {
+			debugInfos = []debugInfo{}
+		}
 
 		player := &game.data.player
 
@@ -1011,8 +1076,24 @@ func run() {
 			}
 
 			// player controls
+			if win.JustPressed(pixelgl.KeyGraveAccent) {
+				debug = !debug
+			}
+			if win.JustPressed(pixelgl.KeyMinus) {
+				timeScale *= 0.5
+				if timeScale < 0.1 {
+					timeScale = 0.0
+				}
+			}
+			if win.JustPressed(pixelgl.KeyEqual) {
+				timeScale *= 2.0
+				if timeScale > 4.0 || timeScale == 0.0 {
+					timeScale = 1.0
+				}
+			}
+
 			direction := pixel.ZV
-			player.velocity = pixel.ZV
+			// player.velocity = pixel.ZV
 			if win.Pressed(pixelgl.KeyLeft) || win.Pressed(pixelgl.KeyA) {
 				direction = direction.Add(pixel.V(-1, 0))
 			}
@@ -1043,7 +1124,8 @@ func run() {
 					1-math.Pow(1.0/512, dt),
 				))
 				player.orientation = orientationDt
-				player.velocity = direction.Unit().Scaled(player.speed)
+				player.Propel(direction.Unit(), dt)
+				// player.velocity = direction.Unit().Scaled(player.speed)
 
 				// partile stream
 				baseVelocity := orientationDt.Unit().Scaled(-1 * player.speed).Scaled(dt)
@@ -1064,13 +1146,14 @@ func run() {
 					NewParticle(pos.X, pos.Y, white, 24.0, pixel.V(0.5, 1.0), 0.0, vel2, 1.0, "ship"),
 				)
 			}
+			player.Update(dt, totalTime, last)
 
 			aim := thumbstickVector(win, currJoystick, pixelgl.AxisRightX, pixelgl.AxisRightY)
 			// if !win.Pressed(pixelgl.KeySpace) && aim.Len() == 0 {
 
 			// }
 			timeSinceBullet := last.Sub(game.data.lastBullet).Seconds()
-			timeSinceAbleToShoot := timeSinceBullet - game.data.weapon.fireRate
+			timeSinceAbleToShoot := timeSinceBullet - (game.data.weapon.fireRate / timeScale)
 
 			if timeSinceAbleToShoot >= 0 {
 				if win.Pressed(pixelgl.KeySpace) {
@@ -1160,6 +1243,7 @@ func run() {
 					speaker.Play(volume)
 				}
 			}
+			player.target = aim
 
 			// set velocities
 			for i, e := range game.data.entities {
@@ -1175,7 +1259,8 @@ func run() {
 					continue
 				}
 
-				dir := e.origin.To(player.origin).Unit()
+				toPlayer := e.origin.To(player.origin).Unit()
+				dir := toPlayer
 				if e.entityType == "wanderer" {
 					if e.target.Len() == 0 || e.origin.To(e.target).Len() < 5.0 {
 						poi := pixel.V(
@@ -1195,35 +1280,39 @@ func run() {
 						if (b == bullet{}) || !b.data.alive {
 							continue
 						}
-						entToBullet := e.origin.Sub(b.data.origin).Unit()
-						if entToBullet.Len() > 500 {
+						entToBullet := e.origin.Sub(b.data.origin)
+						if entToBullet.Len() > 200 {
 							continue
 						}
-
+						entToBullet = entToBullet.Unit()
 						facing := entToBullet.Dot(b.data.orientation.Unit())
 
 						isClosest := (currentlyDodgingDist == -1.0 || entToBullet.Len() < currentlyDodgingDist)
-						if facing > 0.0 && facing > 0.80 && facing < 0.95 && isClosest { // if it's basically dead on, they'll die.
+						if facing > 0.0 && facing > 0.7 && facing < 0.95 && isClosest { // if it's basically dead on, they'll die.
 							currentlyDodgingDist = entToBullet.Len()
 
-							rad := math.Atan2(entToBullet.Unit().Y, entToBullet.Unit().X)
-							dodge1 := rad + (90 * math.Pi / 180)
-							dodge2 := rad - (90 * math.Pi / 180)
-							dodge1Worth := math.Abs(b.data.orientation.Unit().Angle() - dodge1)
-							dodge2Worth := math.Abs(b.data.orientation.Unit().Angle() - dodge2)
-							dodgeDirection := dodge1
-							if dodge2Worth > dodge1Worth {
-								dodgeDirection = dodge2
-							}
+							// rad := math.Atan2(entToBullet.Unit().Y, entToBullet.Unit().X)
+							// dodge1 := math.Mod(rad+(90*math.Pi/180), 360.0)
+							// dodge2 := math.Mod(rad-(90*math.Pi/180), 360.0)
 
-							dodgeVec := pixel.V(math.Cos(dodgeDirection), math.Sin(dodgeDirection))
-							dir = dodgeVec.Scaled(2)
+							// dodgeVec1 := pixel.V(math.Cos(dodge1), math.Sin(dodge1))
+							// dodgeVec2 := pixel.V(math.Cos(dodge2), math.Sin(dodge2))
+
+							// dodgeDirection := dodgeVec1
+							// if e.origin.Add(dodgeVec2).Sub(b.data.origin).Len() > e.origin.Add(dodgeVec1).Sub(b.data.origin).Len() {
+							// 	dodgeDirection = dodgeVec2
+							// }
+
+							if debug {
+								debugInfos = append(debugInfos, debugInfo{p1: e.origin, p2: b.data.origin})
+							}
+							dir = e.origin.Sub(b.data.origin).Scaled(4)
 						}
 					}
 				} else if e.entityType == "pink" {
 					e.orientation = player.origin
 				}
-				e.velocity = dir.Scaled(e.speed)
+				e.Propel(dir, dt)
 				game.data.entities[i] = e
 			}
 
@@ -1244,7 +1333,7 @@ func run() {
 				if !b.alive || b.entityType != "blackhole" || !b.active {
 					continue
 				}
-				maxForce := 0.5
+				maxForce := 800.0
 
 				game.grid.ApplyImplosiveForce(5+b.radius, Vector3{b.origin.X, b.origin.Y, 0.0}, 50+b.radius)
 
@@ -1252,11 +1341,11 @@ func run() {
 				length := dist.Len()
 				if length <= 300.0 {
 					force := pixel.Lerp(
-						dist.Scaled(maxForce),
+						dist.Unit().Scaled(maxForce),
 						pixel.ZV,
 						length/300.0,
 					)
-					player.velocity = player.velocity.Sub(force)
+					player.velocity = player.velocity.Sub(force.Scaled(dt))
 				}
 
 				for pID, p := range game.data.particles {
@@ -1308,13 +1397,13 @@ func run() {
 						n := dist.Unit()
 
 						force := pixel.Lerp(
-							dist.Scaled(maxForce),
-							pixel.ZV,
-							length/300.0,
-						).Scaled(1.0 / float64(e.hp) * float64(b.hp))
-						force = force.Add(pixel.V(n.Y, -n.X).Scaled(force.Len()))
+							n.Scaled(maxForce), // maximum force at close distance
+							pixel.ZV,           // scale down to zero at maximum distance
+							length/300.0,       // at max distance, 1.0, = pixel.ZV
+						)
+						force = force.Add(pixel.V(n.Y, -n.X).Scaled(force.Len() * 0.5)) // add a bit of orbital force
 
-						e.velocity = e.velocity.Add(force)
+						e.velocity = e.velocity.Add(force.Scaled(dt))
 
 						intersection := pixel.C(b.origin, b.radius+8.0).Intersect(e.Circle())
 						if intersection.Radius > 5.0 && e.entityType != "blackhole" {
@@ -1332,7 +1421,7 @@ func run() {
 			game.grid.Update()
 
 			// Apply velocities
-			player.origin = player.origin.Add(player.velocity.Scaled(dt))
+			// player.origin = player.origin.Add(player.velocity.Scaled(dt))
 
 			for i, e := range game.data.entities {
 				if !e.alive && !e.spawning {
@@ -1876,11 +1965,6 @@ func run() {
 			imd.Color = colornames.White
 			imd.SetColorMask(pixel.Alpha(1))
 			d := imdraw.New(nil)
-			if debug {
-				d.Color = colornames.Lightgreen
-				d.Push(player.origin)
-				d.Circle(player.radius, 2)
-			}
 			d.SetMatrix(pixel.IM.Rotated(pixel.ZV, player.orientation.Angle()-math.Pi/2).Moved(player.origin))
 			playerDraw.Draw(d)
 			d.Draw(imd)
@@ -1981,12 +2065,6 @@ func run() {
 						}
 						tmpTarget.Draw(imd)
 					}
-
-					if debug {
-						imd.Color = colornames.Green
-						imd.Push(e.origin)
-						imd.Circle(e.radius, 2)
-					}
 				}
 			}
 
@@ -2010,6 +2088,7 @@ func run() {
 		canvas.Draw(bloom1, pixel.IM.Moved(canvas.Bounds().Center()))
 		bloom1.Draw(bloom2, pixel.IM.Moved(canvas.Bounds().Center()))
 
+		imd.Clear()
 		if game.state == "playing" {
 			for _, e := range game.data.entities {
 				if (!e.alive && e.death != time.Time{}) {
@@ -2030,6 +2109,22 @@ func run() {
 						pixel.IM.Scaled(e.text.Orig, 2.0+growth),
 					)
 				}
+
+				if debug {
+					e.DrawDebug(imd, canvas)
+				}
+			}
+
+			if debug {
+				player.DrawDebug(imd, canvas)
+				for _, debugLog := range debugInfos {
+					if debugLog != (debugInfo{}) {
+						imd.Color = colornames.Whitesmoke
+						imd.Push(debugLog.p1, debugLog.p2)
+						imd.Line(2)
+					}
+				}
+				imd.Draw(canvas)
 			}
 		}
 
@@ -2051,9 +2146,24 @@ func run() {
 			txt := "Score: %d\n"
 			scoreTxt.Dot.X -= (scoreTxt.BoundsOf(txt).W() / 2)
 			fmt.Fprintf(scoreTxt, txt, game.data.score)
-			txt = "X%d"
+			txt = "X%d\n"
 			scoreTxt.Dot.X -= (scoreTxt.BoundsOf(txt).W() / 2)
 			fmt.Fprintf(scoreTxt, txt, game.data.scoreMultiplier)
+
+			if debug {
+				txt = "Debugging: On"
+				fmt.Fprintln(scoreTxt, txt)
+
+				txt = "Timescale: %.2f\n"
+				fmt.Fprintf(scoreTxt, txt, timeScale)
+
+				txt = "Entities: %d\n"
+				fmt.Fprintf(scoreTxt, txt, len(game.data.entities))
+
+				txt = "Particles: %d\n"
+				fmt.Fprintf(scoreTxt, txt, len(game.data.particles))
+			}
+
 			scoreTxt.Draw(
 				win,
 				pixel.IM.Scaled(scoreTxt.Orig, 2),
@@ -2063,9 +2173,10 @@ func run() {
 			txt = "Lives: %d\n"
 			livesTxt.Dot.X -= (livesTxt.BoundsOf(txt).W() / 2)
 			fmt.Fprintf(livesTxt, txt, game.data.lives)
-			txt = "Bombs: %d"
+			txt = "Bombs: %d\n"
 			livesTxt.Dot.X -= (livesTxt.BoundsOf(txt).W() / 2)
 			fmt.Fprintf(livesTxt, txt, game.data.bombs)
+
 			livesTxt.Draw(
 				win,
 				pixel.IM.Scaled(livesTxt.Orig, 2),
