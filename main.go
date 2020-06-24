@@ -636,6 +636,18 @@ func NewPinkPleb(x float64, y float64) *entityData {
 	return w
 }
 
+func NewAngryBubble(x float64, y float64) *entityData {
+	w := NewEntity(x, y, 35.0, 200, "bubble")
+	// w.spawnSound = spawnBuffer4
+	w.spawnTime = 0.0
+	w.spawning = false
+	w.acceleration = 0.9
+	w.speed = 600
+	w.friction = 0.99
+	w.bounty = 100
+	return w
+}
+
 func NewBlackHole(x float64, y float64) *entityData {
 	b := NewEntity(x, y, 40.0, 0.0, "blackhole")
 	b.bounty = 150
@@ -689,14 +701,17 @@ type gamedata struct {
 	lifeReward        int
 	bombReward        int
 	multiplierReward  int
-	waveFreq          float64
 	weaponUpgradeFreq float64
-	spawnFreq         float64
+	waveFreq          float64
+	landingPartyFreq  float64
+	ambientSpawnFreq  float64
+	notoriety         float64
 	spawning          bool
 
 	lastSpawn         time.Time
 	lastBullet        time.Time
 	lastBomb          time.Time
+	lastWave          time.Time
 	lastWeaponUpgrade time.Time
 }
 
@@ -706,11 +721,12 @@ type game struct {
 	grid  grid
 }
 
-func NewWaveData() *wavedata {
+func NewWaveData(template []entityData, freq float64, duration float64) *wavedata {
 	waveData := new(wavedata)
-	waveData.waveDuration = 5
-	waveData.waveStart = time.Time{}
-	waveData.waveEnd = time.Now()
+	waveData.waveDuration = duration
+	waveData.waveStart = time.Now()
+	waveData.waveEnd = time.Now().Add(time.Second * time.Duration(duration))
+
 	return waveData
 }
 
@@ -724,7 +740,7 @@ func NewWeaponData() *weapondata {
 
 func NewBurstWeapon() *weapondata {
 	weaponData := new(weapondata)
-	weaponData.fireRate = 0.18
+	weaponData.fireRate = 0.15
 	weaponData.fireMode = "burst"
 
 	return weaponData
@@ -758,9 +774,11 @@ func NewGameData() *gamedata {
 	gameData.multiplierReward = 25 // kills
 	gameData.lifeReward = 75000
 	gameData.bombReward = 100000
-	gameData.waveFreq = 30
+	gameData.waveFreq = 30 // waves have a duration so can influence the pace of the game
 	gameData.weaponUpgradeFreq = 30
-	gameData.spawnFreq = 1.5
+	gameData.landingPartyFreq = 10 // more strategic one-off spawn systems
+	gameData.ambientSpawnFreq = 2  // ambient spawning can be toggled off temporarily, but is otherwise always going on
+	gameData.notoriety = 0.0       // brings new enemy types into ambient spawning gradually
 	gameData.spawning = true
 	gameData.lastSpawn = time.Now()
 	gameData.lastBullet = time.Now()
@@ -949,7 +967,7 @@ func run() {
 		Maximized: true,
 		VSync:     true,
 	}
-	debug := true
+	debug := false
 	if debug {
 		cfg.Bounds = pixel.R(0, 0, 1024, 768)
 		cfg.Maximized = false
@@ -1091,6 +1109,15 @@ func run() {
 					timeScale = 1.0
 				}
 			}
+			if win.JustPressed(pixelgl.Key1) {
+				game.data.weapon = *NewWeaponData()
+			}
+			if win.JustPressed(pixelgl.Key2) {
+				game.data.weapon = *NewBurstWeapon()
+			}
+			if win.JustPressed(pixelgl.Key3) {
+				game.data.weapon = *NewConicWeapon()
+			}
 
 			direction := pixel.ZV
 			// player.velocity = pixel.ZV
@@ -1165,8 +1192,8 @@ func run() {
 
 				if aim.Len() > 0 {
 					// fmt.Printf("Bullet spawned %s", time.Now().String())
+					rad := math.Atan2(aim.Unit().Y, aim.Unit().X)
 					if game.data.weapon.fireMode == "conic" {
-						rad := math.Atan2(aim.Unit().Y, aim.Unit().X)
 						ang1 := rad + (8 * math.Pi / 180)
 						ang2 := rad - (8 * math.Pi / 180)
 						ang1Vec := pixel.V(math.Cos(ang1), math.Sin(ang1))
@@ -1193,20 +1220,21 @@ func run() {
 						game.data.bullets = append(game.data.bullets, *leftB, *b, *rightB)
 					} else if game.data.weapon.fireMode == "burst" {
 						bulletCount := 5
-						width := 40.0
+						width := 24.0
 						for i := 0; i < bulletCount; i++ {
 							bPos := pixel.V(
 								25.0,
 								-(width/2)+(float64(i)*(width/float64(bulletCount))),
 							).Rotated(
-								aim.Angle(),
+								rad,
 							).Add(player.origin)
 
+							increment := (float64(i) * math.Pi / 180.0) - (2 * math.Pi / 180)
 							b := NewBullet(
 								bPos.X,
 								bPos.Y,
 								1100,
-								aim.Unit(),
+								aim.Unit().Rotated(increment),
 							)
 							game.data.bullets = append(game.data.bullets, *b)
 						}
@@ -1306,6 +1334,22 @@ func run() {
 							if debug {
 								debugInfos = append(debugInfos, debugInfo{p1: e.origin, p2: b.data.origin})
 							}
+
+							baseVelocity := entToBullet.Unit().Scaled(-4)
+
+							midColor := pixel.ToRGBA(color.RGBA{64, 232, 64, 192})
+							pos1 := pixel.V(1, 1).Rotated(e.orientation.Angle()).Scaled(e.radius).Add(e.origin)
+							pos2 := pixel.V(-1, 1).Rotated(e.orientation.Angle()).Scaled(e.radius).Add(e.origin)
+							pos3 := pixel.V(1, -1).Rotated(e.orientation.Angle()).Scaled(e.radius).Add(e.origin)
+							pos4 := pixel.V(-1, -1).Rotated(e.orientation.Angle()).Scaled(e.radius).Add(e.origin)
+							game.data.particles = append(
+								game.data.particles,
+								NewParticle(pos1.X, pos1.Y, midColor, 48.0, pixel.V(0.5, 1.0), 0.0, baseVelocity.Scaled(rand.Float64()*2.0), 1.0, "ship"),
+								NewParticle(pos2.X, pos1.Y, midColor, 48.0, pixel.V(0.5, 1.0), 0.0, baseVelocity.Scaled(rand.Float64()*2.0), 1.0, "ship"),
+								NewParticle(pos3.X, pos1.Y, midColor, 48.0, pixel.V(0.5, 1.0), 0.0, baseVelocity.Scaled(rand.Float64()*2.0), 1.0, "ship"),
+								NewParticle(pos4.X, pos1.Y, midColor, 48.0, pixel.V(0.5, 1.0), 0.0, baseVelocity.Scaled(rand.Float64()*2.0), 1.0, "ship"),
+							)
+
 							dir = e.origin.Sub(b.data.origin).Scaled(4)
 						}
 					}
@@ -1329,11 +1373,30 @@ func run() {
 
 			// Process blackholes
 			// I don't really care about efficiency atm
+			entsToAdd := make([]entityData, 0, 100)
 			for bID, b := range game.data.entities {
 				if !b.alive || b.entityType != "blackhole" || !b.active {
 					continue
 				}
-				maxForce := 800.0
+
+				if b.hp > 15 {
+					game.grid.ApplyExplosiveForce(b.radius*5, Vector3{b.origin.X, b.origin.Y, 0.0}, b.radius*5)
+					game.grid.ApplyDirectedForce(Vector3{0.0, 0.0, 100.0}, Vector3{b.origin.X, b.origin.Y, 0.0}, 50)
+					b.alive = false
+					// spawn bubbles
+					for i := 0; i < 5; i++ {
+						pos := pixel.V(
+							rand.Float64()*200,
+							rand.Float64()*200,
+						).Add(b.origin)
+						pleb := *NewAngryBubble(pos.X, pos.Y)
+						entsToAdd = append(entsToAdd, pleb)
+					}
+					game.data.entities[bID] = b
+					continue
+				}
+
+				maxForce := 2400.0
 
 				game.grid.ApplyImplosiveForce(5+b.radius, Vector3{b.origin.X, b.origin.Y, 0.0}, 50+b.radius)
 
@@ -1346,6 +1409,13 @@ func run() {
 						length/300.0,
 					)
 					player.velocity = player.velocity.Sub(force.Scaled(dt))
+
+					if debug {
+						debugInfos = append(debugInfos, debugInfo{
+							p1: player.origin,
+							p2: player.origin.Sub(force.Scaled(dt * 10)),
+						})
+					}
 				}
 
 				for pID, p := range game.data.particles {
@@ -1401,9 +1471,16 @@ func run() {
 							pixel.ZV,           // scale down to zero at maximum distance
 							length/300.0,       // at max distance, 1.0, = pixel.ZV
 						)
-						force = force.Add(pixel.V(n.Y, -n.X).Scaled(force.Len() * 0.5)) // add a bit of orbital force
+						// force = force.Add(pixel.V(n.Y, -n.X).Scaled(force.Len() * 0.5)) // add a bit of orbital force
 
 						e.velocity = e.velocity.Add(force.Scaled(dt))
+
+						if debug {
+							debugInfos = append(debugInfos, debugInfo{
+								p1: e.origin,
+								p2: e.origin.Add(force.Scaled(dt * 10)),
+							})
+						}
 
 						intersection := pixel.C(b.origin, b.radius+8.0).Intersect(e.Circle())
 						if intersection.Radius > 5.0 && e.entityType != "blackhole" {
@@ -1417,6 +1494,7 @@ func run() {
 
 				game.data.entities[bID] = b
 			}
+			game.data.entities = append(game.data.entities, entsToAdd...)
 
 			game.grid.Update()
 
@@ -1451,7 +1529,7 @@ func run() {
 				}
 			}
 
-			entsToAdd := make([]entityData, 0, 100)
+			entsToAdd = make([]entityData, 0, 100)
 			for bID, b := range game.data.bullets {
 				if b.data.alive {
 					for eID, e := range game.data.entities {
@@ -1690,7 +1768,7 @@ func run() {
 			}
 
 			// ambient spawns
-			if !debug && last.Sub(game.data.lastSpawn).Seconds() > game.data.spawnFreq && game.data.spawning {
+			if !debug && last.Sub(game.data.lastSpawn).Seconds() > game.data.ambientSpawnFreq && game.data.spawning {
 				// spawn
 				spawns := make([]entityData, 0, game.data.spawnCount)
 				for i := 0; i < game.data.spawnCount; i++ {
@@ -1707,48 +1785,18 @@ func run() {
 					}
 
 					var enemy entityData
-					r := rand.Float64()
-					if r < 0.5 {
-						enemy = *NewFollower(
-							pos.X,
-							pos.Y,
-						)
-						// spawnSound := enemy.spawnSound.Streamer(0, enemy.spawnSound.Len())
-						// speaker.Play(spawnSound)
-					} else if r < 0.6 {
-						enemy = *NewWanderer(
-							pos.X,
-							pos.Y,
-						)
-						// spawnSound := enemy.spawnSound.Streamer(0, enemy.spawnSound.Len())
-						// speaker.Play(spawnSound)
-					} else if r < 0.7 {
-						enemy = *NewPinkSquare(
-							pos.X,
-							pos.Y,
-						)
-						// spawnSound := enemy.spawnSound.Streamer(0, enemy.spawnSound.Len())
-						// volume := &effects.Volume{
-						// 	Streamer: spawnSound,
-						// 	Base:     10,
-						// 	Volume:   0.2,
-						// 	Silent:   false,
-						// }
-						// speaker.Play(volume)
-					} else if r < 0.95 {
-						enemy = *NewDodger(
-							pos.X,
-							pos.Y,
-						)
-						// spawnSound := enemy.spawnSound.Streamer(0, enemy.spawnSound.Len())
-						// speaker.Play(spawnSound)
-					} else {
-						enemy = *NewBlackHole(
-							pos.X,
-							pos.Y,
-						)
-						// spawnSound := enemy.spawnSound.Streamer(0, enemy.spawnSound.Len())
-						// speaker.Play(spawnSound)
+					notoriety := math.Min(0.3, game.data.notoriety)
+					r := rand.Float64() * (0.2 + notoriety)
+					if r <= 0.1 {
+						enemy = *NewWanderer(pos.X, pos.Y)
+					} else if r <= 0.4 {
+						enemy = *NewFollower(pos.X, pos.Y)
+					} else if r <= 0.43 {
+						enemy = *NewPinkSquare(pos.X, pos.Y)
+					} else if r <= 0.49 {
+						enemy = *NewDodger(pos.X, pos.Y)
+					} else if r <= 0.5 {
+						enemy = *NewBlackHole(pos.X, pos.Y)
 					}
 
 					spawns = append(spawns, enemy)
@@ -1765,60 +1813,105 @@ func run() {
 				game.data.entities = append(game.data.entities, spawns...)
 				game.data.spawns += 1
 				game.data.lastSpawn = time.Now()
-				if game.data.spawns%20 == 0 && game.data.spawnCount < 4 {
+				if game.data.spawns%15 == 0 && game.data.spawnCount < 4 {
 					game.data.spawnCount += 1
 				}
 
-				if game.data.spawns%10 == 0 && game.data.spawnFreq > 0.6 {
-					game.data.spawnFreq -= 0.1
+				if game.data.kills%10 == 0 {
+					game.data.notoriety += 0.1
+				}
+
+				if game.data.spawns%10 == 0 {
+					if game.data.ambientSpawnFreq > 1.4 {
+						game.data.ambientSpawnFreq -= 0.2
+					} else if game.data.ambientSpawnFreq > 0.6 {
+						game.data.ambientSpawnFreq -= 0.1
+					}
 				}
 			}
 
 			// wave management
-			// if (waveStart == time.Time{}) && last.Sub(waveEnd).Seconds() >= waveFreq { // or the
-			// 	// Start the next wave
-			// 	fmt.Printf("[WaveStart] %s\n", time.Now().String())
-			// 	waveStart = time.Now()
-			// }
+			firstWave := game.data.lastWave == (time.Time{}) && totalTime >= game.data.waveFreq
+			subsequentWave := (game.data.lastWave != (time.Time{}) && last.Sub(game.data.lastWave).Seconds() >= game.data.waveFreq)
+			if firstWave || subsequentWave {
+				corners := [4]pixel.Vec{
+					pixel.V(-(worldWidth/2)+50, -(worldHeight/2)+50),
+					pixel.V(-(worldWidth/2)+50, (worldHeight/2)-50),
+					pixel.V((worldWidth/2)-50, -(worldHeight/2)+50),
+					pixel.V((worldWidth/2)-50, (worldHeight/2)-50),
+				}
+				// one-off landing party
+				fmt.Printf("[LandingPartySpawn] %s\n", time.Now().String())
+				r := rand.Float64() * 0.5
+				if r <= 0.25 {
+					count := rand.Intn(4)
+					for i := 0; i < count; i++ {
+						p := corners[i]
+						enemy := NewDodger(
+							p.X,
+							p.Y,
+						)
+						game.data.entities = append(game.data.entities, *enemy)
+						game.data.spawns += 1
+					}
 
-			// if (waveStart != time.Time{}) && last.Sub(waveStart).Seconds() >= waveDuration { // If a wave has ended
-			// 	// End the wave
-			// 	fmt.Printf("[WaveEnd] %s\n", time.Now().String())
-			// 	waveEnd = time.Now()
-			// 	waveStart = time.Time{}
-			// }
+					spawnSound := spawnBuffer.Streamer(0, spawnBuffer.Len())
+					speaker.Play(spawnSound)
+				} else if r <= 0.5 {
+					count := rand.Intn(4)
+					for i := 0; i < count; i++ {
+						p := corners[i]
+						enemy := NewPinkSquare(
+							p.X,
+							p.Y,
+						)
+						game.data.entities = append(game.data.entities, *enemy)
+						game.data.spawns += 1
+					}
+					// game.data.waves = append(game.data.waves, *NewWaveData("follower", 0.2, 15.0, 20.0))
+					// game.data.lastWave = last
+				}
+				game.data.lastWave = last
+			}
 
-			// if last.Sub(waveStart).Seconds() < waveDuration {
-			// 	// Continue wave
-			// 	// TODO make these data driven
-			// 	// waves would have spawn points, and spawn counts, and probably durations and stuff
-			// 	// hardcoded for now :D
+			for waveID, wave := range game.data.waves {
+				if (wave.waveStart != time.Time{}) {
+					if last.Sub(wave.waveStart).Seconds() >= wave.waveDuration { // If a wave has ended
+						// End the wave
+						fmt.Printf("[WaveEnd] %s\n", time.Now().String())
+						wave.waveEnd = time.Now()
+						wave.waveStart = time.Time{}
+						game.data.waves[waveID] = wave
+					} else if last.Sub(wave.waveStart).Seconds() < wave.waveDuration {
+						// Continue wave
+						// TODO make these data driven
+						// waves would have spawn points, and spawn counts, and probably durations and stuff
+						// hardcoded for now :D
 
-			// 	if last.Sub(lastWaveSpawn).Seconds() > 0.2 {
+						if last.Sub(game.data.lastSpawn).Seconds() > 0.2 {
+							// 4 spawn points
+							points := [4]pixel.Vec{
+								pixel.V(-(worldWidth/2)+50, -(worldHeight/2)+50),
+								pixel.V(-(worldWidth/2)+50, (worldHeight/2)-50),
+								pixel.V((worldWidth/2)-50, -(worldHeight/2)+50),
+								pixel.V((worldWidth/2)-50, (worldHeight/2)-50),
+							}
 
-			// 		// 4 spawn points
-			// 		points := [4]pixel.Vec{
-			// 			pixel.V(-(worldWidth/2)+50, -(worldHeight/2)+50),
-			// 			pixel.V(-(worldWidth/2)+50, (worldHeight/2)-50),
-			// 			pixel.V((worldWidth/2)-50, -(worldHeight/2)+50),
-			// 			pixel.V((worldWidth/2)-50, (worldHeight/2)-50),
-			// 		}
-
-			// 		for _, p := range points {
-			// 			enemy := NewEntity(
-			// 				p.X,
-			// 				p.Y,
-			// 				50,
-			// 				130,
-			// 			)
-			// 			entities = append(entities, *enemy)
-			// 			spawns += 1
-			// 		}
-			// 		spawnSound := spawnBuffer.Streamer(0, spawnBuffer.Len())
-			// 		speaker.Play(spawnSound)
-			// 		lastWaveSpawn = time.Now()
-			// 	}
-			// }
+							for _, p := range points {
+								enemy := NewFollower(
+									p.X,
+									p.Y,
+								)
+								game.data.entities = append(game.data.entities, *enemy)
+								game.data.spawns += 1
+							}
+							spawnSound := spawnBuffer.Streamer(0, spawnBuffer.Len())
+							speaker.Play(spawnSound)
+							game.data.lastSpawn = time.Now()
+						}
+					}
+				}
+			}
 
 			// adjust game rules
 
@@ -2019,16 +2112,16 @@ func run() {
 						imd.Push(e.origin)
 						imd.Circle(size, float64(4))
 						if e.active {
-							heartRate := 0.3 - ((float64(e.hp) / 15.0) * 0.1)
+							heartRate := 0.3 - ((float64(e.hp) / 15.0) * 0.15)
 							volatility := 5 * (math.Mod(totalTime, heartRate) / heartRate)
 
 							size += volatility
 
 							ringWeight := 1.0
 							if volatility > 0 {
-								ringWeight += volatility
+								ringWeight += volatility / 2
 							}
-							imd.Color = pixel.ToRGBA(colornames.White)
+							imd.Color = pixel.ToRGBA(colornames.Floralwhite)
 							imd.Push(e.origin)
 							imd.Circle(size, ringWeight)
 						}
@@ -2054,6 +2147,11 @@ func run() {
 							tmpTarget.Color = colornames.Hotpink
 							tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y-size), pixel.V(e.origin.X+size, e.origin.Y+size))
 							tmpTarget.Rectangle(weight)
+						} else if e.entityType == "bubble" {
+							weight = 2.0
+							tmpTarget.Color = colornames.Deepskyblue
+							tmpTarget.Push(e.origin)
+							tmpTarget.Circle(e.radius, weight)
 						} else if e.entityType == "dodger" {
 							weight = 3.0
 							tmpTarget.Color = colornames.Limegreen
