@@ -392,6 +392,9 @@ type entityData struct {
 	bountyText   string
 	killedPlayer bool
 
+	// pink plebs
+	virtualOrigin pixel.Vec
+
 	// blackholes
 	active bool
 }
@@ -405,7 +408,7 @@ func (e *entityData) SpawnSound() beep.Streamer {
 	}
 }
 
-func (e *entityData) DealDamage(eID int, amount int, currTime time.Time, game *game, entsToAdd []entityData) []entityData {
+func (e *entityData) DealDamage(eID int, amount int, currTime time.Time, game *game, entsToAdd []entityData, player *entityData) []entityData {
 	e.hp -= amount
 	if e.hp <= 0 {
 		e.alive = false
@@ -447,9 +450,16 @@ func (e *entityData) DealDamage(eID int, amount int, currTime time.Time, game *g
 			// spawn 3 mini plebs
 			for i := 0; i < 3; i++ {
 				pos := pixel.V(
-					rand.Float64()*100,
-					rand.Float64()*100,
+					(rand.Float64()*128)-64,
+					rand.Float64()*128,
 				).Add(e.origin)
+				for pos.Sub(player.origin).Len() < 64 { // The player should be able to safely kill at pointblank
+					pos = pixel.V(
+						(rand.Float64()*128)-64,
+						rand.Float64()*128,
+					).Add(e.origin)
+				}
+
 				pleb := *NewPinkPleb(pos.X, pos.Y)
 				entsToAdd = append(entsToAdd, pleb)
 			}
@@ -465,7 +475,7 @@ func (e *entityData) DealDamage(eID int, amount int, currTime time.Time, game *g
 				dirV := e.origin.Sub(ent.origin)
 				dist := dirV.Len()
 				if dist < 150 {
-					ent.DealDamage(entID, 4, currTime, game, entsToAdd)
+					ent.DealDamage(entID, 4, currTime, game, entsToAdd, player)
 					game.data.entities[entID] = ent
 				}
 				if dist < 250 {
@@ -526,7 +536,14 @@ func (e *entityData) Update(dt float64, totalT float64, currTime time.Time) {
 		e.velocity = pixel.ZV
 	}
 
-	e.origin = e.origin.Add(e.velocity.Scaled(dt))
+	if e.entityType == "pinkpleb" {
+		e.virtualOrigin = e.virtualOrigin.Add(e.velocity.Scaled(dt))
+		currentT := math.Mod(currTime.Sub(e.born).Seconds(), 2.0)
+		e.origin = e.virtualOrigin.Add(pixel.V(48.0, 0.0).Rotated(currentT * math.Pi))
+	} else {
+		e.origin = e.origin.Add(e.velocity.Scaled(dt))
+	}
+
 	if e.entityType == "blackhole" {
 		e.radius = 20 + (20 * (float64(e.hp) / 10.0))
 	}
@@ -562,11 +579,17 @@ func (e *entityData) DrawDebug(imd *imdraw.IMDraw, canvas *pixelgl.Canvas) {
 	imd.Push(e.origin, e.origin.Add(e.orientation.Scaled(50)))
 	imd.Line(3)
 
-	// if e.target != (pixel.Vec{}) {
-	// 	imd.Color = colornames.Orange
-	// 	imd.Push(e.origin, e.origin.Add(e.target))
-	// 	imd.Line(2)
-	// }
+	if e.entityType == "pinkpleb" {
+		imd.Color = colornames.Orange
+		imd.Push(e.origin, e.virtualOrigin)
+		imd.Line(3)
+	}
+
+	if e.target != (pixel.Vec{}) {
+		imd.Color = colornames.Orange
+		imd.Push(e.origin, e.origin.Add(e.target.Scaled(100)))
+		imd.Line(2)
+	}
 }
 
 type bullet struct {
@@ -622,7 +645,7 @@ func NewDodger(x float64, y float64) *entityData {
 }
 
 func NewPinkSquare(x float64, y float64) *entityData {
-	w := NewEntity(x, y, 50.0, 450, "pink")
+	w := NewEntity(x, y, 50.0, 400, "pink")
 	w.spawnSound = spawnBuffer5
 	w.friction = 0.98
 	w.bounty = 100
@@ -630,8 +653,10 @@ func NewPinkSquare(x float64, y float64) *entityData {
 }
 
 func NewPinkPleb(x float64, y float64) *entityData {
-	w := NewEntity(x, y, 30.0, 200, "pinkpleb")
+	w := NewEntity(x, y, 30.0, 180, "pinkpleb")
 	// w.spawnSound = spawnBuffer4
+	w.virtualOrigin = pixel.V(x, y)
+	w.origin = w.virtualOrigin.Add(pixel.V(48.0, 0.0))
 	w.spawnTime = 0.0
 	w.spawning = false
 	w.bounty = 75
@@ -1063,7 +1088,7 @@ func run() {
 		// lerp the camera position towards the player
 		camPos = pixel.Lerp(
 			camPos,
-			player.origin,
+			player.origin.Scaled(0.75),
 			1-math.Pow(1.0/128, dt),
 		)
 		cam := pixel.IM.Moved(camPos.Scaled(-1))
@@ -1192,7 +1217,7 @@ func run() {
 					aim = player.origin.To(mp)
 				}
 
-				if aim.Len() > 0 {
+				if aim.Len() > 0.7 {
 					// fmt.Printf("Bullet spawned %s", time.Now().String())
 					rad := math.Atan2(aim.Unit().Y, aim.Unit().X)
 					if game.data.weapon.fireMode == "conic" {
@@ -1273,7 +1298,7 @@ func run() {
 					speaker.Play(volume)
 				}
 			}
-			player.target = aim
+			player.target = aim.Unit()
 
 			// set velocities
 			for i, e := range game.data.entities {
@@ -1363,11 +1388,14 @@ func run() {
 			}
 
 			for i, b := range game.data.bullets {
+				if !b.data.alive {
+					continue
+				}
 				b.data.origin = b.data.origin.Add(b.velocity.Scaled(dt))
 				if game.data.weapon.fireMode == "burst" {
 					game.grid.ApplyExplosiveForce(b.velocity.Scaled(dt).Len()*2, Vector3{b.data.origin.X, b.data.origin.Y, 0.0}, 80.0)
 				} else {
-					game.grid.ApplyExplosiveForce(b.velocity.Scaled(dt).Len()*0.6, Vector3{b.data.origin.X, b.data.origin.Y, 0.0}, 40.0)
+					game.grid.ApplyDirectedForce(Vector3{b.velocity.X * dt * 0.1, b.velocity.Y * dt * 0.1, 0.0}, Vector3{b.data.origin.X, b.data.origin.Y, 0.0}, 40.0)
 				}
 
 				game.data.bullets[i] = b
@@ -1383,7 +1411,7 @@ func run() {
 
 				if b.hp > 15 {
 					game.grid.ApplyExplosiveForce(b.radius*5, Vector3{b.origin.X, b.origin.Y, 0.0}, b.radius*5)
-					game.grid.ApplyDirectedForce(Vector3{0.0, 0.0, 100.0}, Vector3{b.origin.X, b.origin.Y, 0.0}, 50)
+					game.grid.ApplyDirectedForce(Vector3{b.origin.X, b.origin.Y, 100.0}, Vector3{b.origin.X, b.origin.Y, 0.0}, 50)
 					b.alive = false
 					// spawn bubbles
 					for i := 0; i < 5; i++ {
@@ -1446,8 +1474,8 @@ func run() {
 						}
 						n := dist.Unit()
 						// bul.velocity = bul.velocity.Add(dist.Scaled(0.2))
-						push1 := bul.velocity.Add(pixel.V(n.Y, -n.X).Scaled(length * 0.2))
-						push2 := bul.velocity.Add(pixel.V(-n.Y, n.X).Scaled(length * 0.2))
+						push1 := bul.velocity.Add(pixel.V(n.Y, -n.X).Scaled(length * 0.1))
+						push2 := bul.velocity.Add(pixel.V(-n.Y, n.X).Scaled(length * 0.1))
 
 						pushed := push1
 						if bul.data.origin.Add(push2).Sub(b.origin).Len() > bul.data.origin.Add(push1).Sub(b.origin).Len() {
@@ -1516,6 +1544,9 @@ func run() {
 			player.enforceWorldBoundary()
 
 			for id, a := range game.data.entities {
+				if a.entityType == "pinkpleb" {
+					continue
+				}
 				for id2, b := range game.data.entities {
 					if id == id2 {
 						continue
@@ -1539,7 +1570,7 @@ func run() {
 							b.data.alive = false
 							game.data.bullets[bID] = b
 
-							entsToAdd = e.DealDamage(eID, 1, last, game, entsToAdd)
+							entsToAdd = e.DealDamage(eID, 1, last, game, entsToAdd, player)
 
 							game.data.entities[eID] = e
 							break
@@ -1595,7 +1626,7 @@ func run() {
 			// check for bomb here for now
 			bombPressed := win.Pressed(pixelgl.KeyR) || win.JoystickAxis(currJoystick, pixelgl.AxisRightTrigger) > 0.1
 			if game.data.bombs > 0 && bombPressed && last.Sub(game.data.lastBomb).Seconds() > 3.0 {
-				game.grid.ApplyExplosiveForce(256.0, Vector3{player.origin.X, player.origin.Y, 0.0}, 800)
+				game.grid.ApplyExplosiveForce(512.0, Vector3{player.origin.X, player.origin.Y, 0.0}, 512.0)
 				sound := bombBuffer.Streamer(0, bombBuffer.Len())
 				volume := &effects.Volume{
 					Streamer: sound,
@@ -1604,6 +1635,13 @@ func run() {
 					Silent:   false,
 				}
 				speaker.Play(volume)
+
+				for i := 0; i < 2400; i++ {
+					speed := 48.0 * (1.0 - 1/((rand.Float64()*32.0)+1))
+					p := NewParticle(player.origin.X, player.origin.Y, pixel.ToRGBA(colornames.Lightyellow), 100, pixel.Vec{1.5, 1.5}, 0.0, randomVector(speed), 2.0, "player")
+					game.data.particles = append(game.data.particles, p)
+				}
+
 				game.data.lastBomb = time.Now()
 
 				game.data.bombs -= 1
@@ -1779,7 +1817,7 @@ func run() {
 						float64(rand.Intn(worldHeight)-worldHeight/2),
 					)
 					// to regulate distance from player
-					for pos.Sub(player.origin).Len() < 250 {
+					for pos.Sub(player.origin).Len() < 350 {
 						pos = pixel.V(
 							float64(rand.Intn(worldWidth)-worldWidth/2),
 							float64(rand.Intn(worldHeight)-worldHeight/2),
@@ -1994,8 +2032,8 @@ func run() {
 								enforceWorldBoundary(&p, 0.0)
 								enforceWorldBoundary(&left, 0.0)
 								thickness := 1.0
-								if y%3 == 1 {
-									thickness = 3.0
+								if y%3 == 0 {
+									thickness = 4.0
 								}
 								imd.Push(left, p)
 								imd.Line(thickness)
@@ -2009,8 +2047,8 @@ func run() {
 								enforceWorldBoundary(&p, 0.0)
 								enforceWorldBoundary(&up, 0.0)
 								thickness := 1.0
-								if y%3 == 1 {
-									thickness = 3.0
+								if x%3 == 0 {
+									thickness = 4.0
 								}
 								imd.Push(up, p)
 								imd.Line(thickness)
@@ -2063,6 +2101,14 @@ func run() {
 			d.SetMatrix(pixel.IM.Rotated(pixel.ZV, player.orientation.Angle()-math.Pi/2).Moved(player.origin))
 			playerDraw.Draw(d)
 			d.Draw(imd)
+
+			// lastBomb := game.data.lastBomb.Sub(last).Seconds()
+			// if game.data.lastBomb.Sub(last).Seconds() < 1.0 {
+			// 	// draw bomb
+			// 	imd.Color = colornames.White
+			// 	imd.Push(player.origin)
+			// 	imd.Circle(lastBomb*2048.0, 64)
+			// }
 
 			// imd.Push(player.rect.Min, player.rect.Max)
 			// imd.Rectangle(2)
@@ -2149,9 +2195,13 @@ func run() {
 							tmpTarget.Color = colornames.Hotpink
 							tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y-size), pixel.V(e.origin.X+size, e.origin.Y+size))
 							tmpTarget.Rectangle(weight)
+							tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y-size), pixel.V(e.origin.X+size, e.origin.Y+size))
+							tmpTarget.Line(weight)
+							tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y+size), pixel.V(e.origin.X+size, e.origin.Y-size))
+							tmpTarget.Line(weight)
 						} else if e.entityType == "bubble" {
 							weight = 2.0
-							tmpTarget.Color = colornames.Deepskyblue
+							tmpTarget.Color = pixel.ToRGBA(color.RGBA{66, 135, 245, 192})
 							tmpTarget.Push(e.origin)
 							tmpTarget.Circle(e.radius, weight)
 						} else if e.entityType == "dodger" {
