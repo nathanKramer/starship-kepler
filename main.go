@@ -581,8 +581,8 @@ func NewEntity(x float64, y float64, size float64, speed float64, entityType str
 	p.origin = pixel.V(x, y)
 	p.radius = size / 2.0
 	p.speed = speed
-	p.acceleration = 1.8
-	p.friction = 0.95
+	p.acceleration = 7.0
+	p.friction = 0.875
 	p.spawnTime = 0.5
 	p.spawning = true
 	p.hp = 1
@@ -607,14 +607,16 @@ func NewWanderer(x float64, y float64) *entityData {
 	w := NewEntity(x, y, 50.0, 200, "wanderer")
 	w.spawnSound = spawnBuffer4
 	w.volume = -0.4
-	w.acceleration = 0.5
+	w.acceleration = 1
 	w.bounty = 25
 	return w
 }
 
 func NewDodger(x float64, y float64) *entityData {
-	w := NewEntity(x, y, 50.0, 350, "dodger")
+	w := NewEntity(x, y, 50.0, 380, "dodger")
 	w.spawnSound = spawnBuffer2
+	w.acceleration = 2.0
+	w.friction = 0.95
 	w.bounty = 100
 	return w
 }
