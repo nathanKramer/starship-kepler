@@ -759,6 +759,8 @@ func NewSnek(x float64, y float64) *entityData {
 	s := NewEntity(x, y, 30.0, 180, "snek")
 	s.spawnTime = 0.0
 	s.spawning = false
+	s.spawnSound = snakeSpawnBuffer
+	s.volume = -0.8
 	s.cone = 30 + (rand.Float64() * 90.0)
 	s.lastTailSpawn = time.Now()
 	s.bounty = 150
@@ -1394,12 +1396,31 @@ func run() {
 						overflow = 0
 					}
 					game.data.lastBullet = last
-					shot := shotBuffer.Streamer(0, shotBuffer.Len())
+
+					shot := shotBuffer3.Streamer(0, shotBuffer3.Len())
 					volume := &effects.Volume{
 						Streamer: shot,
 						Base:     10,
-						Volume:   -1.2,
+						Volume:   -1.1,
 						Silent:   false,
+					}
+
+					if game.data.weapon.fireMode == "conic" {
+						shot = shotBuffer2.Streamer(0, shotBuffer2.Len())
+						volume = &effects.Volume{
+							Streamer: shot,
+							Base:     10,
+							Volume:   -0.7,
+							Silent:   false,
+						}
+					} else if game.data.weapon.fireMode == "burst" {
+						shot = shotBuffer.Streamer(0, shotBuffer.Len())
+						volume = &effects.Volume{
+							Streamer: shot,
+							Base:     10,
+							Volume:   -0.9,
+							Silent:   false,
+						}
 					}
 					speaker.Play(volume)
 				}
@@ -1495,7 +1516,7 @@ func run() {
 				}
 				b.data.origin = b.data.origin.Add(b.velocity.Scaled(dt))
 				if game.data.weapon.fireMode == "burst" {
-					game.grid.ApplyExplosiveForce(b.velocity.Scaled(dt).Len()*2, Vector3{b.data.origin.X, b.data.origin.Y, 0.0}, 80.0)
+					game.grid.ApplyExplosiveForce(b.velocity.Scaled(dt).Len()*0.5, Vector3{b.data.origin.X, b.data.origin.Y, 0.0}, 80.0)
 				} else {
 					game.grid.ApplyDirectedForce(Vector3{b.velocity.X * dt * 0.05, b.velocity.Y * dt * 0.05, 0.0}, Vector3{b.data.origin.X, b.data.origin.Y, 0.0}, 40.0)
 				}

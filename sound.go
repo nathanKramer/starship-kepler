@@ -12,11 +12,14 @@ import (
 var soundFormat *beep.Format
 var shotSoundFormat *beep.Format
 var shotBuffer *beep.Buffer
+var shotBuffer2 *beep.Buffer
+var shotBuffer3 *beep.Buffer
 var spawnBuffer *beep.Buffer
 var spawnBuffer2 *beep.Buffer
 var spawnBuffer3 *beep.Buffer
 var spawnBuffer4 *beep.Buffer
 var spawnBuffer5 *beep.Buffer
+var snakeSpawnBuffer *beep.Buffer
 var lifeBuffer *beep.Buffer
 var multiplierBuffer *beep.Buffer
 var multiplierBuffer2 *beep.Buffer
@@ -60,12 +63,15 @@ func prepareBuffer(file string) (*beep.Buffer, *beep.Format) {
 func init() {
 	// todo use a data structure probably
 	shotBuffer, shotSoundFormat = prepareBuffer("sound/shoot.mp3")
+	shotBuffer2, shotSoundFormat = prepareBuffer("sound/shoot2.mp3")
+	shotBuffer3, shotSoundFormat = prepareBuffer("sound/shoot3.mp3")
 
 	spawnBuffer, _ = prepareBuffer("sound/spawn.mp3")
 	spawnBuffer2, _ = prepareBuffer("sound/spawn2.mp3")
 	spawnBuffer3, _ = prepareBuffer("sound/spawn3.mp3")
 	spawnBuffer4, _ = prepareBuffer("sound/spawn4.mp3")
 	spawnBuffer5, _ = prepareBuffer("sound/spawn5.mp3")
+	snakeSpawnBuffer, _ = prepareBuffer("sound/snakespawn.mp3")
 
 	lifeBuffer, _ = prepareBuffer("sound/life.mp3")
 	multiplierBuffer, _ = prepareBuffer("sound/multiplierbonus.mp3")
