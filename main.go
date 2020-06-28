@@ -365,23 +365,24 @@ func (g *grid) ApplyExplosiveForce(force float64, origin Vector3, radius float64
 
 // For now just using a god entity struct, honestly this is probably fine
 type entityData struct {
-	target       pixel.Vec // if moving to an arbitrary point, use this
-	orientation  pixel.Vec // current rotation
-	origin       pixel.Vec
-	velocity     pixel.Vec
-	speed        float64
-	acceleration float64
-	friction     float64
-	radius       float64
-	spawnTime    float64
-	spawning     bool
-	born         time.Time
-	death        time.Time
-	expiry       time.Time
-	alive        bool
-	entityType   string
-	text         *text.Text
-	hp           int
+	target         pixel.Vec // if moving to an arbitrary point, use this
+	relativeTarget pixel.Vec // if moving/aiming at a relative point, use this
+	orientation    pixel.Vec // current rotation
+	origin         pixel.Vec
+	velocity       pixel.Vec
+	speed          float64
+	acceleration   float64
+	friction       float64
+	radius         float64
+	spawnTime      float64
+	spawning       bool
+	born           time.Time
+	death          time.Time
+	expiry         time.Time
+	alive          bool
+	entityType     string
+	text           *text.Text
+	hp             int
 
 	// sounds
 	spawnSound *beep.Buffer
@@ -395,8 +396,17 @@ type entityData struct {
 	// pink plebs
 	virtualOrigin pixel.Vec
 
+	// sneks
+	tail          []entityData
+	lastTailSpawn time.Time
+	bornPos       pixel.Vec
+	cone          float64
+
 	// blackholes
 	active bool
+
+	// debugging
+	selected bool
 }
 
 func (e *entityData) SpawnSound() beep.Streamer {
@@ -530,18 +540,52 @@ func (e *entityData) Propel(dir pixel.Vec, dt float64) {
 	}
 }
 
+func (e *entityData) Back(margin float64) pixel.Vec {
+	return e.origin.Add(e.orientation.Scaled((-1 * e.radius) - margin))
+}
+
 func (e *entityData) Update(dt float64, totalT float64, currTime time.Time) {
 	e.velocity = e.velocity.Scaled(e.friction)
 	if e.velocity.Len() < 0.2 {
 		e.velocity = pixel.ZV
 	}
 
+	secondsSinceBirth := currTime.Sub(e.born).Seconds()
 	if e.entityType == "pinkpleb" {
 		e.virtualOrigin = e.virtualOrigin.Add(e.velocity.Scaled(dt))
-		currentT := math.Mod(currTime.Sub(e.born).Seconds(), 2.0)
+		currentT := math.Mod(secondsSinceBirth, 2.0)
 		e.origin = e.virtualOrigin.Add(pixel.V(48.0, 0.0).Rotated(currentT * math.Pi))
 	} else {
 		e.origin = e.origin.Add(e.velocity.Scaled(dt))
+	}
+
+	if e.entityType == "snek" {
+		e.orientation = e.velocity.Unit()
+		nextTailTarget := e.Back(e.radius)
+		for tID, snekT := range e.tail {
+			if snekT.entityType != "snektail" {
+				continue
+			}
+			snekT.target = nextTailTarget
+			snekT.orientation = nextTailTarget.Sub(snekT.Back(snekT.radius)).Unit()
+			snekT.origin = nextTailTarget
+			e.tail[tID] = snekT
+			nextTailTarget = snekT.Back(snekT.radius)
+		}
+		if len(e.tail) < 20 {
+			tailPieceT := nextTailTarget
+			if len(e.tail) > 0 {
+				tailPieceT = e.tail[len(e.tail)-1].Back(e.radius)
+			}
+			tailPiece := NewEntity(e.bornPos.X, e.bornPos.Y, math.Max(((e.radius*2)-4.0)-(float64(len(e.tail)+1)), 4.0), e.speed, "snektail")
+			tailPiece.target = tailPieceT
+			e.tail = append(e.tail, *tailPiece)
+			e.lastTailSpawn = currTime
+		}
+		// for tID, snekT := range e.tail {
+		// 	snekT.origin = snekT.origin.Add(snekT.velocity.Scaled(dt))
+		// 	e.tail[tID] = snekT
+		// }
 	}
 
 	if e.entityType == "blackhole" {
@@ -550,21 +594,42 @@ func (e *entityData) Update(dt float64, totalT float64, currTime time.Time) {
 	e.enforceWorldBoundary()
 }
 
-func (e *entityData) DrawDebug(imd *imdraw.IMDraw, canvas *pixelgl.Canvas) {
+func (e *entityData) DrawDebug(entityID string, imd *imdraw.IMDraw, canvas *pixelgl.Canvas) {
 	e.text.Clear()
 	e.text.Orig = e.origin
 	e.text.Dot = e.origin
 
-	text := fmt.Sprintf(
-		"pos: [%f,%f]\nvelocity: [%f,%f]\nspeed: %f\nfriction: %f\nacceleration: %f\n",
-		e.origin.X, e.origin.Y, e.velocity.X, e.velocity.Y, e.velocity.Len(), e.friction, e.acceleration,
-	)
+	text := fmt.Sprintf("id: %s\npos: [%f, %f]\ntype: %s\n", entityID, e.origin.X, e.origin.Y, e.entityType)
+
+	if e.entityType == "snek" {
+		text += fmt.Sprintf("bornPos: [%f, %f]\ntailLength: %d\n", e.bornPos.X, e.bornPos.Y, len(e.tail))
+	} else if e.entityType == "blackhole" {
+		text += fmt.Sprintf("hp: %d", e.hp)
+	}
+	size := 1.0
+
+	e.text.Color = colornames.Grey
+	if e.selected {
+		size = 2.0
+		e.text.Color = colornames.White
+
+		text += fmt.Sprintf(`
+velocity: [%f,%f]
+speed: %f
+friction: %f
+acceleration: %f
+		`, e.velocity.X,
+			e.velocity.Y,
+			e.velocity.Len(),
+			e.friction,
+			e.acceleration)
+	}
 
 	fmt.Fprintf(e.text, "%s", text)
-	e.text.Color = colornames.White
+
 	e.text.Draw(
 		canvas,
-		pixel.IM.Scaled(e.text.Orig, 1.0).Moved(pixel.V(50, -50)),
+		pixel.IM.Scaled(e.text.Orig, size).Moved(pixel.V(50, -50)),
 	)
 
 	imd.Color = colornames.Green
@@ -586,10 +651,36 @@ func (e *entityData) DrawDebug(imd *imdraw.IMDraw, canvas *pixelgl.Canvas) {
 	}
 
 	if e.target != (pixel.Vec{}) {
+		imd.Color = colornames.Burlywood
+		imd.Push(e.origin, e.target)
+		imd.Line(2)
+	} else {
+		// imd.Color = colornames.Red
+		// imd.Push(e.origin.Add(pixel.V(20, 20)), e.origin.Add(pixel.V(-20, -20)))
+		// imd.Line(2)
+		// imd.Push(e.origin.Add(pixel.V(-20, 20)), e.origin.Add(pixel.V(20, -20)))
+		// imd.Line(2)
+	}
+
+	// imd.Color = colornames.Lawngreen
+	// imd.Push(e.Back().Add(pixel.V(10, 10)), e.Back().Add(pixel.V(-10, -10)))
+	// imd.Line(2)
+	// imd.Push(e.Back().Add(pixel.V(-10, 10)), e.Back().Add(pixel.V(10, -10)))
+	// imd.Line(2)
+
+	if e.relativeTarget != (pixel.Vec{}) {
 		imd.Color = colornames.Orange
 		imd.Push(e.origin, e.origin.Add(e.target.Scaled(100)))
 		imd.Line(2)
 	}
+
+	// if e.entityType == "snek" {
+	// 	for snekID, snekT := range e.tail {
+	// 		if snekT.entityType == "snektail" {
+	// 			snekT.DrawDebug(fmt.Sprintf("tail-%d", snekID), imd, canvas)
+	// 		}
+	// 	}
+	// }
 }
 
 type bullet struct {
@@ -599,7 +690,7 @@ type bullet struct {
 
 func NewEntity(x float64, y float64, size float64, speed float64, entityType string) *entityData {
 	p := new(entityData)
-	p.target = pixel.V(0.0, 1.0)
+	p.target = pixel.Vec{}
 	p.orientation = pixel.V(0.0, 1.0)
 	p.origin = pixel.V(x, y)
 	p.radius = size / 2.0
@@ -613,6 +704,7 @@ func NewEntity(x float64, y float64, size float64, speed float64, entityType str
 	p.entityType = entityType
 	p.volume = 0.0
 	p.born = time.Now()
+	p.bornPos = p.origin
 	p.text = text.New(pixel.V(0, 0), basicFont)
 	return p
 }
@@ -661,6 +753,16 @@ func NewPinkPleb(x float64, y float64) *entityData {
 	w.spawning = false
 	w.bounty = 75
 	return w
+}
+
+func NewSnek(x float64, y float64) *entityData {
+	s := NewEntity(x, y, 30.0, 180, "snek")
+	s.spawnTime = 0.0
+	s.spawning = false
+	s.cone = 30 + (rand.Float64() * 90.0)
+	s.lastTailSpawn = time.Now()
+	s.bounty = 150
+	return s
 }
 
 func NewAngryBubble(x float64, y float64) *entityData {
@@ -820,7 +922,7 @@ func NewGame() *game {
 	game.state = "starting"
 	game.data = *NewGameData()
 
-	maxGridPoints := 1024.0
+	maxGridPoints := 2048.0
 	buffer := 256.0
 	gridSpacing := math.Sqrt(worldWidth * worldHeight / maxGridPoints)
 	game.grid = NewGrid(
@@ -1075,7 +1177,7 @@ func run() {
 	timeScale := 1.0
 	for !win.Closed() {
 		// update
-		dt := time.Since(last).Seconds() * timeScale
+		dt := math.Min(time.Since(last).Seconds(), 0.1) * timeScale
 		totalTime += dt
 		last = time.Now()
 
@@ -1103,6 +1205,10 @@ func run() {
 		if game.state == "starting" {
 			game.data = *NewGameData()
 			game.state = "playing"
+		}
+
+		if (debug || game.state != "playing") && win.Pressed(pixelgl.KeyEnter) || win.JoystickPressed(currJoystick, pixelgl.ButtonA) {
+			game.state = "starting"
 		}
 
 		if game.state == "playing" {
@@ -1298,7 +1404,7 @@ func run() {
 					speaker.Play(volume)
 				}
 			}
-			player.target = aim.Unit()
+			player.relativeTarget = aim.Unit()
 
 			// set velocities
 			for i, e := range game.data.entities {
@@ -1332,7 +1438,7 @@ func run() {
 					e.orientation = player.origin
 					currentlyDodgingDist := -1.0
 					for _, b := range game.data.bullets {
-						if (b == bullet{}) || !b.data.alive {
+						if !b.data.alive {
 							continue
 						}
 						entToBullet := e.origin.Sub(b.data.origin)
@@ -1345,18 +1451,6 @@ func run() {
 						isClosest := (currentlyDodgingDist == -1.0 || entToBullet.Len() < currentlyDodgingDist)
 						if facing > 0.0 && facing > 0.7 && facing < 0.95 && isClosest { // if it's basically dead on, they'll die.
 							currentlyDodgingDist = entToBullet.Len()
-
-							// rad := math.Atan2(entToBullet.Unit().Y, entToBullet.Unit().X)
-							// dodge1 := math.Mod(rad+(90*math.Pi/180), 360.0)
-							// dodge2 := math.Mod(rad-(90*math.Pi/180), 360.0)
-
-							// dodgeVec1 := pixel.V(math.Cos(dodge1), math.Sin(dodge1))
-							// dodgeVec2 := pixel.V(math.Cos(dodge2), math.Sin(dodge2))
-
-							// dodgeDirection := dodgeVec1
-							// if e.origin.Add(dodgeVec2).Sub(b.data.origin).Len() > e.origin.Add(dodgeVec1).Sub(b.data.origin).Len() {
-							// 	dodgeDirection = dodgeVec2
-							// }
 
 							if debug {
 								debugInfos = append(debugInfos, debugInfo{p1: e.origin, p2: b.data.origin})
@@ -1382,8 +1476,16 @@ func run() {
 					}
 				} else if e.entityType == "pink" {
 					e.orientation = player.origin
+				} else if e.entityType == "snek" {
+					t := math.Mod(last.Sub(e.born).Seconds(), 2.0)
+					deg := (math.Sin(t*math.Pi) * e.cone) * math.Pi / 180.0
+					dir = dir.Rotated(deg)
+					if t > 1.9 {
+						e.cone = 30.0 + (rand.Float64() * 90.0)
+					}
 				}
 				e.Propel(dir, dt)
+
 				game.data.entities[i] = e
 			}
 
@@ -1395,7 +1497,7 @@ func run() {
 				if game.data.weapon.fireMode == "burst" {
 					game.grid.ApplyExplosiveForce(b.velocity.Scaled(dt).Len()*2, Vector3{b.data.origin.X, b.data.origin.Y, 0.0}, 80.0)
 				} else {
-					game.grid.ApplyDirectedForce(Vector3{b.velocity.X * dt * 0.1, b.velocity.Y * dt * 0.1, 0.0}, Vector3{b.data.origin.X, b.data.origin.Y, 0.0}, 40.0)
+					game.grid.ApplyDirectedForce(Vector3{b.velocity.X * dt * 0.05, b.velocity.Y * dt * 0.05, 0.0}, Vector3{b.data.origin.X, b.data.origin.Y, 0.0}, 40.0)
 				}
 
 				game.data.bullets[i] = b
@@ -1531,9 +1633,21 @@ func run() {
 			// Apply velocities
 			// player.origin = player.origin.Add(player.velocity.Scaled(dt))
 
+			scaledX := (win.MousePosition().X - (win.Bounds().W() / 2)) * (canvas.Bounds().W() / win.Bounds().W())
+			scaledY := (win.MousePosition().Y - (win.Bounds().H() / 2)) * (canvas.Bounds().H() / win.Bounds().H())
+			mp := pixel.V(scaledX, scaledY).Add(camPos)
 			for i, e := range game.data.entities {
 				if !e.alive && !e.spawning {
 					continue
+				}
+				if debug && win.JustPressed(pixelgl.MouseButton1) {
+					e.selected = e.Circle().Intersect(pixel.C(mp, 4)).Radius > 0
+					if e.entityType == "snek" {
+						for tID, snekT := range e.tail {
+							snekT.selected = snekT.Circle().Intersect(pixel.C(mp, 4)).Radius > 0
+							e.tail[tID] = snekT
+						}
+					}
 				}
 
 				e.Update(dt, totalTime, last)
@@ -1544,11 +1658,11 @@ func run() {
 			player.enforceWorldBoundary()
 
 			for id, a := range game.data.entities {
-				if a.entityType == "pinkpleb" {
+				if a.entityType == "pinkpleb" || a.entityType == "snek" {
 					continue
 				}
 				for id2, b := range game.data.entities {
-					if id == id2 {
+					if id == id2 || b.entityType == "pinkpleb" || b.entityType == "snek" || a.entityType != b.entityType {
 						continue
 					}
 
@@ -1574,6 +1688,14 @@ func run() {
 
 							game.data.entities[eID] = e
 							break
+						} else if e.alive && !e.spawning && e.entityType == "snek" {
+							for _, t := range e.tail {
+								if t.entityType == "snektail" && b.data.Circle().Intersect(t.Circle()).Radius > 0 {
+									b.data.alive = false
+									game.data.bullets[bID] = b
+									break
+								}
+							}
 						}
 					}
 					if !pixel.R(-worldWidth/2, -worldHeight/2, worldWidth/2, worldHeight/2).Contains(b.data.origin) {
@@ -1759,6 +1881,13 @@ func run() {
 					)
 					game.data.entities = append(game.data.entities, enemy)
 				}
+				if win.JustPressed(pixelgl.KeyRightBracket) {
+					enemy := *NewSnek(
+						mp.X,
+						mp.Y,
+					)
+					game.data.entities = append(game.data.entities, enemy)
+				}
 				if win.JustPressed(pixelgl.KeyApostrophe) {
 					enemy := *NewBlackHole(
 						mp.X,
@@ -1825,7 +1954,7 @@ func run() {
 					}
 
 					var enemy entityData
-					notoriety := math.Min(0.3, game.data.notoriety)
+					notoriety := math.Min(0.31, game.data.notoriety)
 					r := rand.Float64() * (0.2 + notoriety)
 					if r <= 0.1 {
 						enemy = *NewWanderer(pos.X, pos.Y)
@@ -1837,6 +1966,8 @@ func run() {
 						enemy = *NewDodger(pos.X, pos.Y)
 					} else if r <= 0.5 {
 						enemy = *NewBlackHole(pos.X, pos.Y)
+					} else {
+						enemy = *NewSnek(pos.X, pos.Y)
 					}
 
 					spawns = append(spawns, enemy)
@@ -1873,7 +2004,7 @@ func run() {
 			// wave management
 			firstWave := game.data.lastWave == (time.Time{}) && totalTime >= game.data.waveFreq
 			subsequentWave := (game.data.lastWave != (time.Time{}) && last.Sub(game.data.lastWave).Seconds() >= game.data.waveFreq)
-			if firstWave || subsequentWave {
+			if !debug && (firstWave || subsequentWave) {
 				corners := [4]pixel.Vec{
 					pixel.V(-(worldWidth/2)+50, -(worldHeight/2)+50),
 					pixel.V(-(worldWidth/2)+50, (worldHeight/2)-50),
@@ -1999,10 +2130,6 @@ func run() {
 				}
 			}
 
-		} else {
-			if win.Pressed(pixelgl.KeyEnter) || win.JoystickPressed(currJoystick, pixelgl.ButtonA) {
-				game.state = "starting"
-			}
 		}
 
 		// draw
@@ -2032,7 +2159,7 @@ func run() {
 								enforceWorldBoundary(&p, 0.0)
 								enforceWorldBoundary(&left, 0.0)
 								thickness := 1.0
-								if y%3 == 0 {
+								if y%2 == 0 {
 									thickness = 4.0
 								}
 								imd.Push(left, p)
@@ -2047,7 +2174,7 @@ func run() {
 								enforceWorldBoundary(&p, 0.0)
 								enforceWorldBoundary(&up, 0.0)
 								thickness := 1.0
-								if x%3 == 0 {
+								if x%2 == 0 {
 									thickness = 4.0
 								}
 								imd.Push(up, p)
@@ -2156,9 +2283,6 @@ func run() {
 						tmpTarget.Draw(imd)
 					} else if e.entityType == "blackhole" {
 						imd.Color = pixel.ToRGBA(colornames.Red)
-
-						imd.Push(e.origin)
-						imd.Circle(size, float64(4))
 						if e.active {
 							heartRate := 0.3 - ((float64(e.hp) / 15.0) * 0.15)
 							volatility := 5 * (math.Mod(totalTime, heartRate) / heartRate)
@@ -2169,9 +2293,12 @@ func run() {
 							if volatility > 0 {
 								ringWeight += volatility / 2
 							}
-							imd.Color = pixel.ToRGBA(colornames.Floralwhite)
+
 							imd.Push(e.origin)
 							imd.Circle(size, ringWeight)
+						} else {
+							imd.Push(e.origin)
+							imd.Circle(size, float64(4))
 						}
 					} else {
 						tmpTarget.Clear()
@@ -2212,6 +2339,21 @@ func run() {
 							tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y), pixel.V(e.origin.X, e.origin.Y+size))
 							tmpTarget.Push(pixel.V(e.origin.X+size, e.origin.Y), pixel.V(e.origin.X, e.origin.Y-size))
 							tmpTarget.Polygon(weight)
+						} else if e.entityType == "snek" {
+							weight = 2.0
+							tmpTarget.Color = pixel.ToRGBA(color.RGBA{66, 135, 245, 192})
+							tmpTarget.Push(e.origin)
+							tmpTarget.Circle(e.radius, weight)
+
+							tmpTarget.SetMatrix(pixel.IM)
+							tmpTarget.Color = colornames.Orangered
+							for _, snekT := range e.tail {
+								if snekT.entityType != "snektail" {
+									continue
+								}
+								tmpTarget.Push(snekT.origin)
+								tmpTarget.Circle(snekT.radius, weight)
+							}
 						}
 						tmpTarget.Draw(imd)
 					}
@@ -2240,7 +2382,7 @@ func run() {
 
 		imd.Clear()
 		if game.state == "playing" {
-			for _, e := range game.data.entities {
+			for eID, e := range game.data.entities {
 				if (!e.alive && e.death != time.Time{}) {
 					// fmt.Print("[DrawBounty]")
 					// Draw the bounty
@@ -2261,12 +2403,12 @@ func run() {
 				}
 
 				if debug {
-					e.DrawDebug(imd, canvas)
+					e.DrawDebug(fmt.Sprintf("%d", eID), imd, canvas)
 				}
 			}
 
 			if debug {
-				player.DrawDebug(imd, canvas)
+				player.DrawDebug("player", imd, canvas)
 				for _, debugLog := range debugInfos {
 					if debugLog != (debugInfo{}) {
 						imd.Color = colornames.Whitesmoke
