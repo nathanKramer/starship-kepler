@@ -592,7 +592,7 @@ func (e *entityData) Update(dt float64, totalT float64, currTime time.Time) {
 	if e.entityType == "blackhole" {
 		e.radius = 20 + (20 * (float64(e.hp) / 10.0))
 	}
-	e.enforceWorldBoundary()
+	e.enforceWorldBoundary(true)
 }
 
 func (e *entityData) DrawDebug(entityID string, imd *imdraw.IMDraw, canvas *pixelgl.Canvas) {
@@ -712,7 +712,6 @@ func NewEntity(x float64, y float64, size float64, speed float64, entityType str
 
 func NewFollower(x float64, y float64) *entityData {
 	e := NewEntity(x, y, 50.0, 300, "follower")
-	e.orientation = pixel.V(1.0, 1.0)
 	e.spawnSound = spawnBuffer
 	e.volume = -0.3
 	e.bounty = 50
@@ -738,15 +737,16 @@ func NewDodger(x float64, y float64) *entityData {
 }
 
 func NewPinkSquare(x float64, y float64) *entityData {
-	w := NewEntity(x, y, 50.0, 400, "pink")
+	w := NewEntity(x, y, 50.0, 460, "pink")
 	w.spawnSound = spawnBuffer5
+	w.acceleration = 1.0
 	w.friction = 0.98
 	w.bounty = 100
 	return w
 }
 
 func NewPinkPleb(x float64, y float64) *entityData {
-	w := NewEntity(x, y, 30.0, 180, "pinkpleb")
+	w := NewEntity(x, y, 30.0, 256, "pinkpleb")
 	// w.spawnSound = spawnBuffer4
 	w.virtualOrigin = pixel.V(x, y)
 	w.origin = w.virtualOrigin.Add(pixel.V(48.0, 0.0))
@@ -807,6 +807,11 @@ func NewBullet(x float64, y float64, speed float64, target pixel.Vec) *bullet {
 
 // STATE
 
+type menu struct {
+	selection int
+	options   []string
+}
+
 type wavedata struct {
 	waveDuration float64
 	waveStart    time.Time
@@ -858,7 +863,24 @@ type gamedata struct {
 type game struct {
 	state string
 	data  gamedata
+	menu  menu
 	grid  grid
+}
+
+// Menus
+
+func NewMainMenu() menu {
+	return menu{
+		selection: 0,
+		options:   []string{"Play", "Quit"},
+	}
+}
+
+func NewPauseMenu() menu {
+	return menu{
+		selection: 0,
+		options:   []string{"Resume", "Main Menu"},
+	}
 }
 
 func NewWaveData(entityType string, freq float64, duration float64) *wavedata {
@@ -935,6 +957,7 @@ func NewGame() *game {
 	game := new(game)
 	game.state = "start_screen"
 	game.data = *NewGameData()
+	game.menu = NewMainMenu()
 
 	maxGridPoints := 2048.0
 	buffer := 256.0
@@ -1069,20 +1092,32 @@ func enforceWorldBoundary(v *pixel.Vec, margin float64) { // this code seems dum
 	}
 }
 
-func (p *entityData) enforceWorldBoundary() { // this code seems dumb, TODO: find some api call that does it
+func (p *entityData) enforceWorldBoundary(bounce bool) { // this code seems dumb, TODO: find some api call that does it
 	minX := -(worldWidth / 2.0) + p.radius
 	minY := -(worldHeight / 2.0) + p.radius
 	maxX := (worldWidth / 2.) - p.radius
 	maxY := (worldHeight / 2.0) - p.radius
 	if p.origin.X < minX {
 		p.origin.X = minX
+		if bounce {
+			p.velocity.X *= -1.0
+		}
 	} else if p.origin.X > maxX {
 		p.origin.X = maxX
+		if bounce {
+			p.velocity.X *= -1.0
+		}
 	}
 	if p.origin.Y < minY {
 		p.origin.Y = minY
+		if bounce {
+			p.velocity.Y *= -1.0
+		}
 	} else if p.origin.Y > maxY {
 		p.origin.Y = maxY
+		if bounce {
+			p.velocity.Y *= -1.0
+		}
 	}
 }
 
@@ -1189,6 +1224,14 @@ func run() {
 	totalTime := 0.0
 	timeScale := 1.0
 	for !win.Closed() {
+		if win.Pressed(pixelgl.KeyEscape) {
+			game.state = "quitting"
+		}
+
+		if game.state == "quitting" {
+			win.SetClosed(true)
+		}
+
 		// update
 		dt := math.Min(time.Since(last).Seconds(), 0.1) * timeScale
 		totalTime += dt
@@ -1209,9 +1252,30 @@ func run() {
 		cam := pixel.IM.Moved(camPos.Scaled(-1))
 		canvas.SetMatrix(cam)
 
+		if game.state == "main_menu" {
+			if win.JustPressed(pixelgl.KeyEnter) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonA) {
+				if game.menu.options[game.menu.selection] == "Play" {
+					game.state = "starting"
+				}
+				if game.menu.options[game.menu.selection] == "Quit" {
+					game.state = "quitting"
+				}
+			}
+
+			if win.JustPressed(pixelgl.KeyUp) {
+				game.menu.selection = (game.menu.selection - 1) % len(game.menu.options)
+				if game.menu.selection < 0 {
+					// would have thought modulo would handle negatives. /shrug
+					game.menu.selection += len(game.menu.options)
+				}
+			} else if win.JustPressed(pixelgl.KeyDown) {
+				game.menu.selection = (game.menu.selection + 1) % len(game.menu.options)
+			}
+		}
+
 		if game.state == "start_screen" {
 			if win.Pressed(pixelgl.KeyEnter) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonA) {
-				game.state = "starting"
+				game.state = "main_menu"
 			}
 		}
 
@@ -1227,20 +1291,19 @@ func run() {
 			game.state = "playing"
 		}
 
-		if (debug || game.state != "playing") && win.Pressed(pixelgl.KeyEnter) || win.JoystickPressed(currJoystick, pixelgl.ButtonA) {
+		if (debug || game.state == "game_over") && win.Pressed(pixelgl.KeyEnter) || win.JoystickPressed(currJoystick, pixelgl.ButtonA) {
 			game.state = "starting"
 		}
 
 		if game.state == "start_screen" {
 			centeredTxt.Clear()
-			line := "Tether Games"
+			line := "Kepler's Notebook"
 
 			centeredTxt.Orig = pixel.Lerp(
 				pixel.V(0.0, -400), pixel.V(0.0, 300.0), totalTime/6.0,
 			)
 			centeredTxt.Dot.X -= (centeredTxt.BoundsOf(line).W() / 2)
 			fmt.Fprintln(centeredTxt, line)
-
 			if totalTime > 6.0 {
 				game.state = "starting"
 			}
@@ -1723,7 +1786,7 @@ func run() {
 			}
 
 			// check for collisions
-			player.enforceWorldBoundary()
+			player.enforceWorldBoundary(false)
 
 			for id, a := range game.data.entities {
 				if a.entityType == "pinkpleb" || a.entityType == "snek" {
@@ -2532,8 +2595,20 @@ func run() {
 						weight := 2.0
 						if e.entityType == "follower" {
 							tmpTarget.Color = colornames.Deepskyblue
-							tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y-size), pixel.V(e.origin.X+size, e.origin.Y+size))
-							tmpTarget.Rectangle(weight)
+
+							growth := size / 10.0
+							timeSinceBorn := last.Sub(e.born).Seconds()
+
+							xRad := (size + growth) + (growth * math.Sin(2*math.Pi*(math.Mod(timeSinceBorn, 2.0)/2.0)))
+							yRad := (size + growth) + (growth * -math.Cos(2*math.Pi*(math.Mod(timeSinceBorn, 2.0)/2.0)))
+							tmpTarget.Push(
+								pixel.V(e.origin.X-xRad, e.origin.Y),
+								pixel.V(e.origin.X, e.origin.Y+yRad),
+								pixel.V(e.origin.X+xRad, e.origin.Y),
+								pixel.V(e.origin.X, e.origin.Y-yRad),
+								pixel.V(e.origin.X-xRad, e.origin.Y),
+							)
+							tmpTarget.Polygon(weight)
 						} else if e.entityType == "pink" {
 							weight = 4.0
 							tmpTarget.Color = colornames.Hotpink
@@ -2583,7 +2658,7 @@ func run() {
 						} else if e.entityType == "replicator" {
 							tmpTarget.Color = colornames.Orangered
 							tmpTarget.Push(e.origin)
-							tmpTarget.Circle(e.radius, 2.0)
+							tmpTarget.Circle(e.radius, 4.0)
 						}
 						tmpTarget.Draw(imd)
 					}
@@ -2726,6 +2801,43 @@ func run() {
 					5,
 				),
 			)
+		} else if game.state == "main_menu" {
+			play := text.New(pixel.V(0, 0), basicFont)
+			line := "Play" // localisation with a dictionary probs
+			playSize := 2.0
+			if game.menu.options[game.menu.selection] == "Play" {
+				playSize = 4.0
+			}
+
+			play.Orig = pixel.V(0.0, -128.0/playSize)
+			play.Dot.X -= (play.BoundsOf(line).W() / 2)
+			fmt.Fprintln(play, line)
+
+			quit := text.New(pixel.V(0, 0), basicFont)
+			quitTxt := "Quit" // localisation with a dictionary probs
+			quitSize := 2.0
+			if game.menu.options[game.menu.selection] == "Quit" {
+				quitSize = 4.0
+			}
+
+			quit.Orig = pixel.V(0.0, 0)
+			quit.Dot.X -= (quit.BoundsOf(line).W() / 2)
+			fmt.Fprintln(quit, quitTxt)
+
+			play.Draw(
+				win,
+				pixel.IM.Scaled(
+					play.Orig,
+					playSize,
+				),
+			)
+			quit.Draw(
+				win,
+				pixel.IM.Scaled(
+					quit.Orig,
+					quitSize,
+				),
+			)
 		} else if game.state == "game_over" {
 			gameOverTxt.Draw(
 				win,
@@ -2734,10 +2846,6 @@ func run() {
 					4,
 				),
 			)
-		}
-
-		if win.Pressed(pixelgl.KeyEscape) {
-			win.SetClosed(true)
 		}
 
 		win.Update()
