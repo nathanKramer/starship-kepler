@@ -1414,7 +1414,7 @@ func run() {
 			timeSinceAbleToShoot := timeSinceBullet - (game.data.weapon.fireRate / timeScale)
 
 			if timeSinceAbleToShoot >= 0 {
-				if win.Pressed(pixelgl.KeySpace) {
+				if win.Pressed(pixelgl.MouseButton1) || win.Pressed(pixelgl.KeyLeftSuper) {
 					scaledX := (win.MousePosition().X - (win.Bounds().W() / 2)) * (canvas.Bounds().W() / win.Bounds().W())
 					scaledY := (win.MousePosition().Y - (win.Bounds().H() / 2)) * (canvas.Bounds().H() / win.Bounds().H())
 					mp := pixel.V(scaledX, scaledY).Add(camPos)
@@ -1877,7 +1877,7 @@ func run() {
 			}
 
 			// check for bomb here for now
-			bombPressed := win.Pressed(pixelgl.KeyR) || win.JoystickAxis(currJoystick, pixelgl.AxisRightTrigger) > 0.1
+			bombPressed := win.Pressed(pixelgl.KeyR) || win.Pressed(pixelgl.KeySpace) || win.JoystickAxis(currJoystick, pixelgl.AxisRightTrigger) > 0.1
 			if game.data.bombs > 0 && bombPressed && last.Sub(game.data.lastBomb).Seconds() > 3.0 {
 				game.grid.ApplyExplosiveForce(512.0, Vector3{player.origin.X, player.origin.Y, 0.0}, 512.0)
 				sound := bombBuffer.Streamer(0, bombBuffer.Len())
