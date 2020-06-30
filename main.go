@@ -403,7 +403,8 @@ type entityData struct {
 	cone          float64
 
 	// blackholes
-	active bool
+	active                bool
+	particleEmissionAngle float64
 
 	// debugging
 	selected bool
@@ -756,7 +757,7 @@ func NewPinkPleb(x float64, y float64) *entityData {
 }
 
 func NewSnek(x float64, y float64) *entityData {
-	s := NewEntity(x, y, 30.0, 180, "snek")
+	s := NewEntity(x, y, 30.0, 280, "snek")
 	s.spawnTime = 0.0
 	s.spawning = false
 	s.spawnSound = snakeSpawnBuffer
@@ -789,9 +790,15 @@ func NewBlackHole(x float64, y float64) *entityData {
 	return b
 }
 
+func NewReplicator(x float64, y float64) *entityData {
+	b := NewEntity(x, y, 20.0, 160.0, "replicator")
+	b.bounty = 50
+	return b
+}
+
 func NewBullet(x float64, y float64, speed float64, target pixel.Vec) *bullet {
 	b := new(bullet)
-	b.data = *NewEntity(x, y, 3, speed, "bullet")
+	b.data = *NewEntity(x, y, 8, speed, "bullet")
 	b.data.target = target
 	b.data.orientation = target
 	b.velocity = target.Scaled(speed)
@@ -804,6 +811,8 @@ type wavedata struct {
 	waveDuration float64
 	waveStart    time.Time
 	waveEnd      time.Time
+	entityType   string
+	spawnFreq    float64
 	lastSpawn    time.Time
 }
 
@@ -852,10 +861,12 @@ type game struct {
 	grid  grid
 }
 
-func NewWaveData(template []entityData, freq float64, duration float64) *wavedata {
+func NewWaveData(entityType string, freq float64, duration float64) *wavedata {
 	waveData := new(wavedata)
 	waveData.waveDuration = duration
 	waveData.waveStart = time.Now()
+	waveData.spawnFreq = freq
+	waveData.entityType = entityType
 	waveData.waveEnd = time.Now().Add(time.Second * time.Duration(duration))
 
 	return waveData
@@ -887,7 +898,7 @@ func NewConicWeapon() *weapondata {
 
 func NewGameData() *gamedata {
 	gameData := new(gamedata)
-	gameData.lives = 3
+	gameData.lives = 500
 	gameData.bombs = 3
 	gameData.scoreMultiplier = 1
 	gameData.entities = make([]entityData, 0, 100)
@@ -908,20 +919,21 @@ func NewGameData() *gamedata {
 	gameData.waveFreq = 30 // waves have a duration so can influence the pace of the game
 	gameData.weaponUpgradeFreq = 30
 	gameData.landingPartyFreq = 10 // more strategic one-off spawn systems
-	gameData.ambientSpawnFreq = 2  // ambient spawning can be toggled off temporarily, but is otherwise always going on
+	gameData.ambientSpawnFreq = 3  // ambient spawning can be toggled off temporarily, but is otherwise always going on
 	gameData.notoriety = 0.0       // brings new enemy types into ambient spawning gradually
 	gameData.spawning = true
 	gameData.lastSpawn = time.Now()
 	gameData.lastBullet = time.Now()
 	gameData.lastBomb = time.Now()
 	gameData.lastWeaponUpgrade = time.Time{}
+	gameData.lastWave = time.Time{}
 
 	return gameData
 }
 
 func NewGame() *game {
 	game := new(game)
-	game.state = "starting"
+	game.state = "start_screen"
 	game.data = *NewGameData()
 
 	maxGridPoints := 2048.0
@@ -1154,7 +1166,7 @@ func run() {
 	// Fonts
 	basicFont = text.NewAtlas(basicfont.Face7x13, text.ASCII)
 	gameOverTxt := text.New(pixel.V(0, 0), basicFont)
-	pausedTxt := text.New(pixel.V(0, 0), basicFont)
+	centeredTxt := text.New(pixel.V(0, 0), basicFont)
 	scoreTxt := text.New(pixel.V(-(win.Bounds().W()/2)+120, (win.Bounds().H()/2)-50), basicFont)
 	livesTxt := text.New(pixel.V(0.0, (win.Bounds().H()/2)-50), basicFont)
 
@@ -1172,8 +1184,7 @@ func run() {
 
 	// precache player draw
 	drawShip(playerDraw)
-	playMusic()
-
+	playIntroMusic()
 	debugInfos := []debugInfo{}
 	totalTime := 0.0
 	timeScale := 1.0
@@ -1198,6 +1209,12 @@ func run() {
 		cam := pixel.IM.Moved(camPos.Scaled(-1))
 		canvas.SetMatrix(cam)
 
+		if game.state == "start_screen" {
+			if win.Pressed(pixelgl.KeyEnter) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonA) {
+				game.state = "starting"
+			}
+		}
+
 		if game.state == "paused" {
 			if win.Pressed(pixelgl.KeyEnter) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonA) {
 				game.state = "playing"
@@ -1205,6 +1222,7 @@ func run() {
 		}
 
 		if game.state == "starting" {
+			playMusic()
 			game.data = *NewGameData()
 			game.state = "playing"
 		}
@@ -1213,19 +1231,34 @@ func run() {
 			game.state = "starting"
 		}
 
+		if game.state == "start_screen" {
+			centeredTxt.Clear()
+			line := "Tether Games"
+
+			centeredTxt.Orig = pixel.Lerp(
+				pixel.V(0.0, -400), pixel.V(0.0, 300.0), totalTime/6.0,
+			)
+			centeredTxt.Dot.X -= (centeredTxt.BoundsOf(line).W() / 2)
+			fmt.Fprintln(centeredTxt, line)
+
+			if totalTime > 6.0 {
+				game.state = "starting"
+			}
+		}
+
 		if game.state == "playing" {
 			if !player.alive {
 				game.respawnPlayer()
-				game.grid.ApplyDirectedForce(Vector3{0.0, 0.0, 5000.0}, Vector3{player.origin.X, player.origin.Y, 0.0}, 50)
+				game.grid.ApplyDirectedForce(Vector3{0.0, 0.0, 1400.0}, Vector3{player.origin.X, player.origin.Y, 0.0}, 80)
 			}
 
 			if win.Pressed(pixelgl.KeyP) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonStart) {
 				game.state = "paused"
-				pausedTxt.Clear()
+				centeredTxt.Clear()
 				line := "Paused."
 
-				pausedTxt.Dot.X -= (pausedTxt.BoundsOf(line).W() / 2)
-				fmt.Fprintln(pausedTxt, line)
+				centeredTxt.Dot.X -= (centeredTxt.BoundsOf(line).W() / 2)
+				fmt.Fprintln(centeredTxt, line)
 			}
 
 			// player controls
@@ -1401,7 +1434,7 @@ func run() {
 					volume := &effects.Volume{
 						Streamer: shot,
 						Base:     10,
-						Volume:   -1.1,
+						Volume:   -1.3,
 						Silent:   false,
 					}
 
@@ -1502,7 +1535,7 @@ func run() {
 					deg := (math.Sin(t*math.Pi) * e.cone) * math.Pi / 180.0
 					dir = dir.Rotated(deg)
 					if t > 1.9 {
-						e.cone = 30.0 + (rand.Float64() * 90.0)
+						e.cone = 60.0 + (rand.Float64() * 90.0)
 					}
 				}
 				e.Propel(dir, dt)
@@ -1516,7 +1549,7 @@ func run() {
 				}
 				b.data.origin = b.data.origin.Add(b.velocity.Scaled(dt))
 				if game.data.weapon.fireMode == "burst" {
-					game.grid.ApplyExplosiveForce(b.velocity.Scaled(dt).Len()*0.5, Vector3{b.data.origin.X, b.data.origin.Y, 0.0}, 80.0)
+					game.grid.ApplyExplosiveForce(b.velocity.Scaled(dt).Len()*0.4, Vector3{b.data.origin.X, b.data.origin.Y, 0.0}, 80.0)
 				} else {
 					game.grid.ApplyDirectedForce(Vector3{b.velocity.X * dt * 0.05, b.velocity.Y * dt * 0.05, 0.0}, Vector3{b.data.origin.X, b.data.origin.Y, 0.0}, 40.0)
 				}
@@ -1530,6 +1563,20 @@ func run() {
 			for bID, b := range game.data.entities {
 				if !b.alive || b.entityType != "blackhole" || !b.active {
 					continue
+				}
+
+				// emit particles
+				if (uint64(totalTime*1000)/125)%2 == 0 {
+					v := 6.0 + (rand.Float64() * 12)
+					sprayVelocity := pixel.V(math.Cos(b.particleEmissionAngle), math.Sin(b.particleEmissionAngle)).Unit().Scaled(v)
+					color := colornames.Lightskyblue
+					pos := b.origin
+					game.data.particles = append(
+						game.data.particles,
+						NewParticle(pos.X, pos.Y, pixel.ToRGBA(color), 128.0, pixel.V(1.5, 1.5), 0.0, sprayVelocity, 2.0, "blackhole"),
+					)
+
+					b.particleEmissionAngle -= math.Pi / 25.0
 				}
 
 				if b.hp > 15 {
@@ -2005,7 +2052,7 @@ func run() {
 				game.data.entities = append(game.data.entities, spawns...)
 				game.data.spawns += 1
 				game.data.lastSpawn = time.Now()
-				if game.data.spawns%15 == 0 && game.data.spawnCount < 4 {
+				if game.data.spawns%3 == 0 && game.data.spawnCount < 4 {
 					game.data.spawnCount += 1
 				}
 
@@ -2013,11 +2060,15 @@ func run() {
 					game.data.notoriety += 0.1
 				}
 
-				if game.data.spawns%10 == 0 {
-					if game.data.ambientSpawnFreq > 1.4 {
-						game.data.ambientSpawnFreq -= 0.2
-					} else if game.data.ambientSpawnFreq > 0.6 {
-						game.data.ambientSpawnFreq -= 0.1
+				if game.data.spawns%20 == 0 {
+					if game.data.ambientSpawnFreq > 1 {
+						game.data.ambientSpawnFreq -= 0.5
+					}
+				}
+
+				if game.data.spawns%25 == 0 {
+					if game.data.waveFreq > 5 {
+						game.data.waveFreq -= 5
 					}
 				}
 			}
@@ -2027,18 +2078,18 @@ func run() {
 			subsequentWave := (game.data.lastWave != (time.Time{}) && last.Sub(game.data.lastWave).Seconds() >= game.data.waveFreq)
 			if !debug && (firstWave || subsequentWave) {
 				corners := [4]pixel.Vec{
-					pixel.V(-(worldWidth/2)+50, -(worldHeight/2)+50),
-					pixel.V(-(worldWidth/2)+50, (worldHeight/2)-50),
-					pixel.V((worldWidth/2)-50, -(worldHeight/2)+50),
-					pixel.V((worldWidth/2)-50, (worldHeight/2)-50),
+					pixel.V(-(worldWidth/2)+80, -(worldHeight/2)+80),
+					pixel.V(-(worldWidth/2)+80, (worldHeight/2)-80),
+					pixel.V((worldWidth/2)-80, -(worldHeight/2)+80),
+					pixel.V((worldWidth/2)-80, (worldHeight/2)-80),
 				}
 				// one-off landing party
 				fmt.Printf("[LandingPartySpawn] %s\n", time.Now().String())
-				r := rand.Float64() * 0.5
-				if r <= 0.25 {
-					count := rand.Intn(4)
+				r := rand.Float64() * (0.4 + math.Min(game.data.notoriety, 0.6))
+				if r <= 0.1 {
+					count := 2 + rand.Intn(4)
 					for i := 0; i < count; i++ {
-						p := corners[i]
+						p := corners[i%4]
 						enemy := NewDodger(
 							p.X,
 							p.Y,
@@ -2049,10 +2100,10 @@ func run() {
 
 					spawnSound := spawnBuffer.Streamer(0, spawnBuffer.Len())
 					speaker.Play(spawnSound)
-				} else if r <= 0.5 {
-					count := rand.Intn(4)
+				} else if r <= 0.2 {
+					count := 2 + rand.Intn(4)
 					for i := 0; i < count; i++ {
-						p := corners[i]
+						p := corners[i%4]
 						enemy := NewPinkSquare(
 							p.X,
 							p.Y,
@@ -2060,8 +2111,142 @@ func run() {
 						game.data.entities = append(game.data.entities, *enemy)
 						game.data.spawns += 1
 					}
-					// game.data.waves = append(game.data.waves, *NewWaveData("follower", 0.2, 15.0, 20.0))
-					// game.data.lastWave = last
+				} else if r <= 0.25 {
+					count := 8 + rand.Intn(4)
+					for i := 0; i < count; i++ {
+						p := corners[i%4]
+						enemy := NewSnek(
+							p.X,
+							p.Y,
+						)
+						game.data.entities = append(game.data.entities, *enemy)
+						game.data.spawns += 1
+					}
+				} else if r <= 0.5 {
+					r := rand.Intn(4)
+					var t string
+					var freq float64
+					var duration float64
+					switch r {
+					case 0:
+						t = "follower"
+						freq = 0.5
+						duration = 10.0
+					case 1:
+						t = "dodger"
+						freq = 0.25
+						duration = 3.0
+					case 2:
+						t = "pink"
+						freq = 0.2
+						duration = 1.0
+					case 3:
+						t = "replicator"
+						freq = 0.2
+						duration = 5.0
+					}
+
+					game.data.waves = append(game.data.waves, *NewWaveData(t, freq, duration))
+					game.data.lastWave = last
+				} else if r <= 0.55 {
+					total := 8.0
+					step := 360.0 / total
+					for i := 0.0; i < total; i++ {
+						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+						spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(450.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+						game.data.entities = append(
+							game.data.entities,
+							*NewFollower(spawnPos.X, spawnPos.Y),
+							*NewFollower(spawnPos2.X, spawnPos2.Y),
+						)
+						game.data.spawns += 2
+					}
+				} else if r <= 0.575 {
+					total := 8.0
+					step := 360.0 / total
+					for i := 0.0; i < total; i++ {
+						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+						spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(450.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+						game.data.entities = append(
+							game.data.entities,
+							*NewDodger(spawnPos.X, spawnPos.Y),
+							*NewDodger(spawnPos2.X, spawnPos2.Y),
+						)
+						game.data.spawns += 2
+					}
+				} else if r <= 0.6 {
+					total := 10.0
+					step := 360.0 / total
+					for i := 0.0; i < total; i++ {
+						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+						spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(550.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+						game.data.entities = append(
+							game.data.entities,
+							*NewSnek(spawnPos.X, spawnPos.Y),
+							*NewSnek(spawnPos2.X, spawnPos2.Y),
+						)
+						game.data.spawns += 2
+					}
+				} else if r <= 0.67 {
+					total := 4.0
+					step := 360.0 / total
+					for i := 0.0; i < total; i++ {
+						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(450.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+						spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+						game.data.entities = append(
+							game.data.entities,
+							*NewPinkSquare(spawnPos.X, spawnPos.Y),
+							*NewPinkSquare(spawnPos2.X, spawnPos2.Y),
+						)
+						game.data.spawns += 2
+					}
+				} else if r <= 0.75 {
+					for _, corner := range corners {
+						blackhole := NewBlackHole(
+							corner.X,
+							corner.Y,
+						)
+						snek := NewSnek(
+							corner.X,
+							corner.Y,
+						)
+						pink := NewPinkSquare(
+							corner.X,
+							corner.Y,
+						)
+						dodger := NewDodger(
+							corner.X,
+							corner.Y,
+						)
+						game.data.entities = append(
+							game.data.entities, *blackhole, *snek, *pink, *dodger,
+						)
+						game.data.spawns += 4
+					}
+				} else if r <= 0.85 {
+					total := 4.0
+					step := 360.0 / total
+					for i := 0.0; i < total; i++ {
+						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+						game.data.entities = append(
+							game.data.entities,
+							*NewBlackHole(spawnPos.X, spawnPos.Y),
+						)
+						game.data.spawns += 2
+					}
+				} else {
+					total := 14.0
+					step := 360.0 / total
+					for i := 0.0; i < total; i++ {
+						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+						spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(650.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+						game.data.entities = append(
+							game.data.entities,
+							*NewFollower(spawnPos.X, spawnPos.Y),
+							*NewFollower(spawnPos2.X, spawnPos2.Y),
+						)
+						game.data.spawns += 2
+					}
 				}
 				game.data.lastWave = last
 			}
@@ -2080,26 +2265,45 @@ func run() {
 						// waves would have spawn points, and spawn counts, and probably durations and stuff
 						// hardcoded for now :D
 
-						if last.Sub(game.data.lastSpawn).Seconds() > 0.2 {
+						if last.Sub(wave.lastSpawn).Seconds() > wave.spawnFreq {
 							// 4 spawn points
 							points := [4]pixel.Vec{
-								pixel.V(-(worldWidth/2)+50, -(worldHeight/2)+50),
-								pixel.V(-(worldWidth/2)+50, (worldHeight/2)-50),
-								pixel.V((worldWidth/2)-50, -(worldHeight/2)+50),
-								pixel.V((worldWidth/2)-50, (worldHeight/2)-50),
+								pixel.V(-(worldWidth/2)+64, -(worldHeight/2)+64),
+								pixel.V(-(worldWidth/2)+64, (worldHeight/2)-64),
+								pixel.V((worldWidth/2)-64, -(worldHeight/2)+64),
+								pixel.V((worldWidth/2)-64, (worldHeight/2)-64),
 							}
 
 							for _, p := range points {
-								enemy := NewFollower(
-									p.X,
-									p.Y,
-								)
+								var enemy *entityData
+								if wave.entityType == "follower" { // dictionary lookup?
+									enemy = NewFollower(
+										p.X,
+										p.Y,
+									)
+								} else if wave.entityType == "dodger" {
+									enemy = NewDodger(
+										p.X,
+										p.Y,
+									)
+								} else if wave.entityType == "pink" {
+									enemy = NewPinkSquare(
+										p.X,
+										p.Y,
+									)
+								} else if wave.entityType == "replicator" {
+									enemy = NewReplicator(
+										p.X,
+										p.Y,
+									)
+								}
 								game.data.entities = append(game.data.entities, *enemy)
 								game.data.spawns += 1
 							}
 							spawnSound := spawnBuffer.Streamer(0, spawnBuffer.Len())
 							speaker.Play(spawnSound)
-							game.data.lastSpawn = time.Now()
+							wave.lastSpawn = time.Now()
+							game.data.waves[waveID] = wave
 						}
 					}
 				}
@@ -2305,14 +2509,15 @@ func run() {
 					} else if e.entityType == "blackhole" {
 						imd.Color = pixel.ToRGBA(colornames.Red)
 						if e.active {
-							heartRate := 0.3 - ((float64(e.hp) / 15.0) * 0.15)
+							heartRate := 0.5 - ((float64(e.hp) / 15.0) * 0.35)
 							volatility := 5 * (math.Mod(totalTime, heartRate) / heartRate)
+							imd.Color = color.RGBA{255, uint8(24 + (38 * volatility)), uint8(24 + (38 * volatility)), 224}
 
 							size += volatility
 
-							ringWeight := 1.0
+							ringWeight := 2.0
 							if volatility > 0 {
-								ringWeight += volatility / 2
+								ringWeight += volatility
 							}
 
 							imd.Push(e.origin)
@@ -2375,6 +2580,10 @@ func run() {
 								tmpTarget.Push(snekT.origin)
 								tmpTarget.Circle(snekT.radius, weight)
 							}
+						} else if e.entityType == "replicator" {
+							tmpTarget.Color = colornames.Orangered
+							tmpTarget.Push(e.origin)
+							tmpTarget.Circle(e.radius, 2.0)
 						}
 						tmpTarget.Draw(imd)
 					}
@@ -2495,10 +2704,25 @@ func run() {
 				pixel.IM.Scaled(livesTxt.Orig, 2),
 			)
 		} else if game.state == "paused" {
-			pausedTxt.Draw(
+			centeredTxt.Color = color.RGBA64{255, 255, 255, 255}
+			centeredTxt.Draw(
 				win,
 				pixel.IM.Scaled(
-					pausedTxt.Orig,
+					centeredTxt.Orig,
+					5,
+				),
+			)
+		} else if game.state == "start_screen" {
+			// fadeEffect := (totalTime - 4.0) / 2.0
+			// if fadeEffect < 0.0 {
+			// 	fadeEffect = 0.0
+			// }
+			// a := 224 - (224 * fadeEffect)
+			// centeredTxt.Color = color.RGBA64{255, 255, 255, 255}
+			centeredTxt.Draw(
+				win,
+				pixel.IM.Scaled(
+					centeredTxt.Orig,
 					5,
 				),
 			)

@@ -36,6 +36,7 @@ var multiplierSounds map[int]*beep.Buffer
 
 var bombBuffer *beep.Buffer
 var musicStreamer *beep.StreamSeekCloser
+var introStreamer *beep.StreamSeekCloser
 
 func prepareStreamer(file string) (*beep.StreamSeekCloser, *beep.Format) {
 	sound, _ := os.Open(file)
@@ -98,10 +99,19 @@ func init() {
 	bombBuffer, _ = prepareBuffer("sound/usebomb.mp3")
 
 	musicStreamer, soundFormat = prepareStreamer("sound/music.mp3")
+	introStreamer, soundFormat = prepareStreamer("sound/intro.mp3")
 	speaker.Init(soundFormat.SampleRate, soundFormat.SampleRate.N(time.Second/10))
 }
 
+func playIntroMusic() {
+	speaker.Clear()
+	s := *introStreamer
+	speaker.Play(s)
+	// defer s.Close()
+}
+
 func playMusic() {
+	speaker.Clear()
 	s := *musicStreamer
 	speaker.Play(s)
 	// defer s.Close()
