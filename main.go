@@ -5,6 +5,7 @@ import (
 	"image/color"
 	_ "image/png"
 	"io/ioutil"
+	"log"
 	"math"
 	"math/rand"
 	"time"
@@ -18,14 +19,18 @@ import (
 	"github.com/faiface/pixel/imdraw"
 	"github.com/faiface/pixel/pixelgl"
 	"github.com/faiface/pixel/text"
+	"github.com/golang/freetype/truetype"
 	"golang.org/x/image/colornames"
+	"golang.org/x/image/font"
 	"golang.org/x/image/font/basicfont"
 )
 
 const maxParticles = 1600
 const worldWidth = 1440.0
 const worldHeight = 1080.0
+const gameTitle = "Starship Kepler"
 
+var titleFont *text.Atlas
 var basicFont *text.Atlas
 
 // Particles
@@ -425,6 +430,15 @@ func (e *entityData) SpawnSound() beep.Streamer {
 func (e *entityData) IntersectWithPlayer(eID int, game *game, player *entityData, currTime time.Time, entsToAdd []entityData, gameOverTxt *text.Text) {
 	if e.entityType == "gate" {
 		game.grid.ApplyExplosiveForce(100, Vector3{e.origin.X, e.origin.Y, 0.0}, 100)
+
+		deathSound := blackholeDieBuffer.Streamer(0, blackholeDieBuffer.Len())
+		volume := &effects.Volume{
+			Streamer: deathSound,
+			Base:     10,
+			Volume:   -0.25,
+			Silent:   false,
+		}
+		speaker.Play(volume)
 		// damage surrounding entities and push them back
 		for entID, ent := range game.data.entities {
 			if eID == entID || !ent.alive || ent.spawning || ent.entityType == "gate" {
@@ -441,7 +455,6 @@ func (e *entityData) IntersectWithPlayer(eID int, game *game, player *entityData
 		e.alive = false
 	} else {
 		e.killedPlayer = true
-		game.data.lives--
 		player.alive = false
 		player.death = currTime
 
@@ -450,20 +463,32 @@ func (e *entityData) IntersectWithPlayer(eID int, game *game, player *entityData
 			p := NewParticle(player.origin.X, player.origin.Y, pixel.ToRGBA(colornames.Lightyellow), 100, pixel.Vec{1.5, 1.5}, 0.0, randomVector(speed), 2.5, "player")
 			game.data.particles = append(game.data.particles, p)
 		}
-
-		if game.data.lives == 0 {
-			game.state = "game_over"
-
-			gameOverTxt.Clear()
-			lines := []string{
-				"Game Over.",
-				"Score: " + fmt.Sprintf("%d", game.data.score),
-				"Press enter to restart",
+		if game.data.mode == "menu_game" {
+			game.data.player = *NewPlayer(0.0, 0.0)
+			for entID, ent := range game.data.entities {
+				if !ent.alive {
+					continue
+				}
+				ent.alive = false
+				game.data.entities[entID] = ent
 			}
-			for _, line := range lines {
-				gameOverTxt.Dot.X -= (gameOverTxt.BoundsOf(line).W() / 2)
-				fmt.Fprintln(gameOverTxt, line)
+		} else {
+			game.data.lives--
+			if game.data.lives == 0 {
+				game.state = "game_over"
+
+				gameOverTxt.Clear()
+				lines := []string{
+					"Game Over.",
+					"Score: " + fmt.Sprintf("%d", game.data.score),
+					"Press enter to restart",
+				}
+				for _, line := range lines {
+					gameOverTxt.Dot.X -= (gameOverTxt.BoundsOf(line).W() / 2)
+					fmt.Fprintln(gameOverTxt, line)
+				}
 			}
+
 		}
 	}
 	game.data.entities[eID] = *e
@@ -528,6 +553,14 @@ func (e *entityData) DealDamage(eID int, amount int, currTime time.Time, game *g
 			// speaker.Play(spawnSound)
 		} else if e.entityType == "blackhole" {
 			game.grid.ApplyExplosiveForce(200, Vector3{e.origin.X, e.origin.Y, 0.0}, 200)
+			deathSound := blackholeDieBuffer.Streamer(0, blackholeDieBuffer.Len())
+			volume := &effects.Volume{
+				Streamer: deathSound,
+				Base:     10,
+				Volume:   -0.25,
+				Silent:   false,
+			}
+			speaker.Play(volume)
 			// damage surrounding entities and push them back
 			for entID, ent := range game.data.entities {
 				if eID == entID || !ent.alive || ent.spawning {
@@ -770,6 +803,10 @@ func NewEntity(x float64, y float64, size float64, speed float64, entityType str
 	return p
 }
 
+func NewPlayer(x float64, y float64) *entityData {
+	return NewEntity(0.0, 0.0, 44, 575, "player")
+}
+
 func NewFollower(x float64, y float64) *entityData {
 	e := NewEntity(x, y, 44.0, 280, "follower")
 	e.spawnSound = spawnBuffer
@@ -920,6 +957,7 @@ type gamedata struct {
 	landingPartyFreq  float64
 	ambientSpawnFreq  float64
 	notoriety         float64
+	timescale         float64
 	spawning          bool
 
 	lastSpawn         time.Time
@@ -941,7 +979,7 @@ type game struct {
 func NewMainMenu() menu {
 	return menu{
 		selection: 0,
-		options:   []string{"Play: Evolved", "Play: Pacifism", "Quit"},
+		options:   []string{"Play: Evolved", "Play: Pacifism", "Options", "Quit"},
 	}
 }
 
@@ -989,13 +1027,14 @@ func NewConicWeapon() *weapondata {
 
 func NewGameData() *gamedata {
 	gameData := new(gamedata)
+	gameData.mode = "none"
 	gameData.lives = 500
 	gameData.bombs = 3
 	gameData.scoreMultiplier = 1
 	gameData.entities = make([]entityData, 0, 100)
 	gameData.bullets = make([]bullet, 0, 100)
 	gameData.particles = make([]particle, 0, maxParticles)
-	gameData.player = *NewEntity(0.0, 0.0, 44, 575, "player")
+	gameData.player = *NewPlayer(0.0, 0.0)
 	gameData.spawns = 0
 	gameData.spawnCount = 1
 	gameData.scoreSinceBorn = 0
@@ -1010,8 +1049,24 @@ func NewGameData() *gamedata {
 	gameData.lastBomb = time.Now()
 	gameData.lastWeaponUpgrade = time.Time{}
 	gameData.lastWave = time.Time{}
+	gameData.timescale = 1.0
 
 	return gameData
+}
+
+func NewMenuGame() *gamedata {
+	data := NewGameData()
+	data.mode = "menu_game"
+	data.timescale = 0.4
+	data.weapon = *NewBurstWeapon()
+	data.multiplierReward = 25 // kills
+	data.lifeReward = 75000
+	data.bombReward = 100000
+	data.waveFreq = 30 // waves have a duration so can influence the pace of the game
+	data.weaponUpgradeFreq = 30
+	data.landingPartyFreq = 10 // more strategic one-off spawn systems
+	data.ambientSpawnFreq = 3  // ambient spawning can be toggled off temporarily, but is otherwise always going on
+	return data
 }
 
 func NewEvolvedGame() *gamedata {
@@ -1064,15 +1119,19 @@ func NewGame() *game {
 func (data *gamedata) respawnPlayer() {
 	data.entities = make([]entityData, 0, 100)
 	data.bullets = make([]bullet, 0, 100)
-	data.player = *NewEntity(0.0, 0.0, 44, 575, "player")
+	data.player = *NewPlayer(0.0, 0.0)
 	data.scoreMultiplier = 1
 	data.scoreSinceBorn = 0
 	data.killsSinceBorn = 0
 }
 
+func (data *gamedata) AmbientSpawnFreq() float64 {
+	return data.ambientSpawnFreq * data.timescale
+}
+
 func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime float64, player *entityData) {
 	// ambient spawns
-	if !debug && last.Sub(game.data.lastSpawn).Seconds() > game.data.ambientSpawnFreq && game.data.spawning {
+	if !debug && last.Sub(game.data.lastSpawn).Seconds() > game.data.AmbientSpawnFreq() && game.data.spawning {
 		// spawn
 		spawns := make([]entityData, 0, game.data.spawnCount)
 		for i := 0; i < game.data.spawnCount; i++ {
@@ -1446,7 +1505,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 
 func (game *game) pacifismGameModeUpdate(debug bool, last time.Time, totalTime float64, player *entityData) {
 	// ambient spawns
-	if !debug && last.Sub(game.data.lastSpawn).Seconds() > game.data.ambientSpawnFreq && game.data.spawning {
+	if !debug && last.Sub(game.data.lastSpawn).Seconds() > game.data.AmbientSpawnFreq() && game.data.spawning {
 		// spawn
 		spawns := make([]entityData, 0, game.data.spawnCount)
 		corners := [4]pixel.Vec{
@@ -1467,18 +1526,24 @@ func (game *game) pacifismGameModeUpdate(debug bool, last time.Time, totalTime f
 			spawns = append(spawns, enemy)
 		}
 
-		pos = pixel.V(
-			float64(rand.Intn(worldWidth)-worldWidth/2),
-			float64(rand.Intn(worldHeight)-worldHeight/2),
-		)
-		// to regulate distance from player
-		for pos.Sub(player.origin).Len() < 350 {
+		gateCount := game.data.spawnCount / 8
+		if gateCount < 1 {
+			gateCount = 1
+		}
+		for i := 0; i < gateCount; i++ {
 			pos = pixel.V(
 				float64(rand.Intn(worldWidth)-worldWidth/2),
 				float64(rand.Intn(worldHeight)-worldHeight/2),
 			)
+			// to regulate distance from player
+			for pos.Sub(player.origin).Len() < 350 {
+				pos = pixel.V(
+					float64(rand.Intn(worldWidth)-worldWidth/2),
+					float64(rand.Intn(worldHeight)-worldHeight/2),
+				)
+			}
+			spawns = append(spawns, *NewGate(pos.X, pos.Y))
 		}
-		spawns = append(spawns, *NewGate(pos.X, pos.Y))
 
 		playback := map[string]bool{}
 		for _, e := range spawns {
@@ -1492,12 +1557,12 @@ func (game *game) pacifismGameModeUpdate(debug bool, last time.Time, totalTime f
 		game.data.spawns += len(spawns)
 		game.data.lastSpawn = time.Now()
 
-		if game.data.spawns%10 == 0 && game.data.spawnCount < 10 {
+		if game.data.spawns%10 == 0 && game.data.spawnCount < 40 {
 			game.data.spawnCount++
 		}
 
 		if game.data.spawns%20 == 0 {
-			if game.data.ambientSpawnFreq > 2 {
+			if game.data.ambientSpawnFreq > 1 {
 				game.data.ambientSpawnFreq -= 0.25
 			}
 		}
@@ -1694,6 +1759,7 @@ func run() {
 	mapRect.Rectangle(4)
 
 	canvas := pixelgl.NewCanvas(pixel.R(-cfg.Bounds.W()/2, -cfg.Bounds.H()/2, cfg.Bounds.W()/2, cfg.Bounds.H()/2))
+	uiCanvas := pixelgl.NewCanvas(pixel.R(-cfg.Bounds.W()/2, -cfg.Bounds.H()/2, cfg.Bounds.W()/2, cfg.Bounds.H()/2))
 
 	bloom1 := pixelgl.NewCanvas(pixel.R(-cfg.Bounds.W()/2, -cfg.Bounds.H()/2, cfg.Bounds.W()/2, cfg.Bounds.H()/2))
 	extractBrightness, err := loadFileToString("./shaders/extract_bright_areas.glsl")
@@ -1726,8 +1792,41 @@ func run() {
 	// Game initialization
 	last := time.Now()
 
-	// Fonts
-	basicFont = text.NewAtlas(basicfont.Face7x13, text.ASCII)
+	// Fonts and text
+	ttfData, err := ioutil.ReadFile("./font/gabriel_serif/Gabriel Serif.ttf")
+	if err != nil {
+		log.Fatal(err)
+	}
+	var titleFace font.Face = basicfont.Face7x13
+	tFont, err := truetype.Parse(ttfData)
+	if err != nil {
+		log.Fatal(err)
+	} else {
+		titleFace = truetype.NewFace(tFont, &truetype.Options{
+			Size: 24.0,
+			DPI:  96,
+		})
+	}
+	// Fonts and text
+	ttfData, err = ioutil.ReadFile("./font/comfortaa/Comfortaa-Regular.ttf")
+	if err != nil {
+		log.Fatal(err)
+	}
+	var normalFace font.Face = basicfont.Face7x13
+	nFont, err := truetype.Parse(ttfData)
+	if err != nil {
+		log.Fatal(err)
+	} else {
+		normalFace = truetype.NewFace(nFont, &truetype.Options{
+			Size: 18.0,
+			DPI:  96,
+		})
+	}
+
+	titleFont = text.NewAtlas(titleFace, text.ASCII)
+	basicFont = text.NewAtlas(normalFace, text.ASCII)
+
+	titleTxt := text.New(pixel.V(0, 128), titleFont)
 	gameOverTxt := text.New(pixel.V(0, 0), basicFont)
 	centeredTxt := text.New(pixel.V(0, 0), basicFont)
 	scoreTxt := text.New(pixel.V(-(win.Bounds().W()/2)+120, (win.Bounds().H()/2)-50), basicFont)
@@ -1750,18 +1849,13 @@ func run() {
 	playIntroMusic()
 	debugInfos := []debugInfo{}
 	totalTime := 0.0
-	timeScale := 1.0
 	for !win.Closed() {
-		if win.Pressed(pixelgl.KeyEscape) {
-			game.state = "quitting"
-		}
-
 		if game.state == "quitting" {
 			win.SetClosed(true)
 		}
 
 		// update
-		dt := math.Min(time.Since(last).Seconds(), 0.1) * timeScale
+		dt := math.Min(time.Since(last).Seconds(), 0.1) * game.data.timescale
 		totalTime += dt
 		last = time.Now()
 
@@ -1807,14 +1901,37 @@ func run() {
 		}
 
 		if game.state == "start_screen" {
-			if win.Pressed(pixelgl.KeyEnter) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonA) {
+			if win.JustPressed(pixelgl.KeyEnter) || win.JustPressed(pixelgl.KeyEscape) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonA) {
 				game.state = "main_menu"
+				playMenuMusic()
+				game.data = *NewMenuGame()
 			}
 		}
 
 		if game.state == "paused" {
 			if win.Pressed(pixelgl.KeyEnter) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonA) {
 				game.state = "playing"
+			}
+			if win.JustPressed(pixelgl.KeyEnter) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonA) {
+				if game.menu.options[game.menu.selection] == "Resume" {
+					game.state = "playing"
+				}
+				if game.menu.options[game.menu.selection] == "Main Menu" {
+					game.state = "main_menu"
+					playMenuMusic()
+					game.menu = NewMainMenu()
+					game.data = *NewMenuGame()
+				}
+			}
+
+			if win.JustPressed(pixelgl.KeyUp) {
+				game.menu.selection = (game.menu.selection - 1) % len(game.menu.options)
+				if game.menu.selection < 0 {
+					// would have thought modulo would handle negatives. /shrug
+					game.menu.selection += len(game.menu.options)
+				}
+			} else if win.JustPressed(pixelgl.KeyDown) {
+				game.menu.selection = (game.menu.selection + 1) % len(game.menu.options)
 			}
 		}
 
@@ -1823,37 +1940,20 @@ func run() {
 			game.state = "playing"
 		}
 
-		if (debug || game.state == "game_over") && win.Pressed(pixelgl.KeyEnter) || win.JoystickPressed(currJoystick, pixelgl.ButtonA) {
+		if ((game.state == "playing" && debug) || game.state == "game_over") && win.Pressed(pixelgl.KeyEnter) || win.JoystickPressed(currJoystick, pixelgl.ButtonA) {
 			game.state = "starting"
 		}
 
-		if game.state == "start_screen" {
-			centeredTxt.Clear()
-			line := "Kepler's Notebook"
-
-			centeredTxt.Orig = pixel.Lerp(
-				pixel.V(0.0, -400), pixel.V(0.0, 300.0), totalTime/6.0,
-			)
-			centeredTxt.Dot.X -= (centeredTxt.BoundsOf(line).W() / 2)
-			fmt.Fprintln(centeredTxt, line)
-			if totalTime > 6.0 {
-				game.state = "starting"
-			}
-		}
-
+		direction := pixel.ZV
 		if game.state == "playing" {
 			if !player.alive {
 				game.respawnPlayer()
 				game.grid.ApplyDirectedForce(Vector3{0.0, 0.0, 1400.0}, Vector3{player.origin.X, player.origin.Y, 0.0}, 80)
 			}
 
-			if win.Pressed(pixelgl.KeyP) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonStart) {
+			if win.JustPressed(pixelgl.KeyEscape) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonStart) {
 				game.state = "paused"
-				centeredTxt.Clear()
-				line := "Paused."
-
-				centeredTxt.Dot.X -= (centeredTxt.BoundsOf(line).W() / 2)
-				fmt.Fprintln(centeredTxt, line)
+				game.menu = NewPauseMenu()
 			}
 
 			// player controls
@@ -1861,15 +1961,15 @@ func run() {
 				debug = !debug
 			}
 			if win.JustPressed(pixelgl.KeyMinus) {
-				timeScale *= 0.5
-				if timeScale < 0.1 {
-					timeScale = 0.0
+				game.data.timescale *= 0.5
+				if game.data.timescale < 0.1 {
+					game.data.timescale = 0.0
 				}
 			}
 			if win.JustPressed(pixelgl.KeyEqual) {
-				timeScale *= 2.0
-				if timeScale > 4.0 || timeScale == 0.0 {
-					timeScale = 1.0
+				game.data.timescale *= 2.0
+				if game.data.timescale > 4.0 || game.data.timescale == 0.0 {
+					game.data.timescale = 1.0
 				}
 			}
 			if win.JustPressed(pixelgl.Key1) {
@@ -1882,7 +1982,6 @@ func run() {
 				game.data.weapon = *NewConicWeapon()
 			}
 
-			direction := pixel.ZV
 			// player.velocity = pixel.ZV
 			if win.Pressed(pixelgl.KeyLeft) || win.Pressed(pixelgl.KeyA) {
 				direction = direction.Add(pixel.V(-1, 0))
@@ -1905,6 +2004,111 @@ func run() {
 					pixelgl.AxisLeftY,
 				)
 				direction = direction.Add(moveVec)
+			}
+
+			// spawn entities
+			// This is a long procedure to allow spawning enemies for test purposes
+			if debug {
+				scaledX := (win.MousePosition().X - (win.Bounds().W() / 2)) * (canvas.Bounds().W() / win.Bounds().W())
+				scaledY := (win.MousePosition().Y - (win.Bounds().H() / 2)) * (canvas.Bounds().H() / win.Bounds().H())
+				mp := pixel.V(scaledX, scaledY).Add(camPos)
+
+				if win.JustPressed(pixelgl.KeyJ) {
+					enemy := *NewWanderer(
+						mp.X,
+						mp.Y,
+					)
+					game.data.entities = append(game.data.entities, enemy)
+				}
+				if win.JustPressed(pixelgl.KeyK) {
+					enemy := *NewFollower(
+						mp.X,
+						mp.Y,
+					)
+					game.data.entities = append(game.data.entities, enemy)
+				}
+				if win.JustPressed(pixelgl.KeyL) {
+					enemy := *NewDodger(
+						mp.X,
+						mp.Y,
+					)
+					game.data.entities = append(game.data.entities, enemy)
+				}
+				if win.JustPressed(pixelgl.KeySemicolon) {
+					enemy := *NewPinkSquare(
+						mp.X,
+						mp.Y,
+					)
+					game.data.entities = append(game.data.entities, enemy)
+				}
+				if win.JustPressed(pixelgl.KeyRightBracket) {
+					enemy := *NewSnek(
+						mp.X,
+						mp.Y,
+					)
+					game.data.entities = append(game.data.entities, enemy)
+				}
+				if win.JustPressed(pixelgl.KeyApostrophe) {
+					enemy := *NewBlackHole(
+						mp.X,
+						mp.Y,
+					)
+					game.data.entities = append(game.data.entities, enemy)
+				}
+
+				total := 16.0
+				step := 360.0 / total
+				if win.JustPressed(pixelgl.KeyN) {
+					for i := 0.0; i < total; i++ {
+						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+						enemy := *NewWanderer(spawnPos.X, spawnPos.Y)
+						game.data.entities = append(game.data.entities, enemy)
+					}
+				}
+				if win.JustPressed(pixelgl.KeyM) {
+					for i := 0.0; i < total; i++ {
+						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+						enemy := *NewFollower(spawnPos.X, spawnPos.Y)
+						game.data.entities = append(game.data.entities, enemy)
+					}
+				}
+				if win.JustPressed(pixelgl.KeyComma) {
+					for i := 0.0; i < total; i++ {
+						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+						enemy := *NewDodger(spawnPos.X, spawnPos.Y)
+						game.data.entities = append(game.data.entities, enemy)
+					}
+				}
+				if win.JustPressed(pixelgl.KeyPeriod) {
+					for i := 0.0; i < total; i++ {
+						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+						enemy := *NewPinkSquare(spawnPos.X, spawnPos.Y)
+						game.data.entities = append(game.data.entities, enemy)
+					}
+				}
+				if win.JustPressed(pixelgl.KeySlash) {
+					for i := 0.0; i < total; i++ {
+						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+						enemy := *NewBlackHole(spawnPos.X, spawnPos.Y)
+						game.data.entities = append(game.data.entities, enemy)
+					}
+				}
+
+			}
+		}
+
+		if game.state == "playing" || game.data.mode == "menu_game" {
+			if game.data.mode == "menu_game" {
+				if player.target.Len() == 0 || player.origin.To(player.target).Len() < 5.0 {
+					poi := pixel.V(
+						(rand.Float64()*worldWidth)-worldWidth/2.0,
+						(rand.Float64()*worldHeight)-worldHeight/2.0,
+					)
+					player.target = player.origin.Sub(poi).Unit().Scaled(rand.Float64()*400 + 200)
+					enforceWorldBoundary(&player.target, player.radius*2)
+				}
+				player.orientation = player.orientation.Rotated(60 * math.Pi / 180 * dt).Unit()
+				direction = player.origin.To(player.target).Unit()
 			}
 
 			if direction.Len() > 0.5 {
@@ -1943,10 +2147,22 @@ func run() {
 
 			// }
 			timeSinceBullet := last.Sub(game.data.lastBullet).Seconds()
-			timeSinceAbleToShoot := timeSinceBullet - (game.data.weapon.fireRate / timeScale)
+			timeSinceAbleToShoot := timeSinceBullet - (game.data.weapon.fireRate / game.data.timescale)
 
-			if timeSinceAbleToShoot >= 0 {
-				if win.Pressed(pixelgl.MouseButton1) || win.Pressed(pixelgl.KeyLeftSuper) {
+			if game.data.weapon != (weapondata{}) && timeSinceAbleToShoot >= 0 {
+				if game.data.mode == "menu_game" {
+					closest := 100000.0
+					closestEntity := pixel.Vec{}
+					for _, e := range game.data.entities {
+						if e.alive && !e.spawning && player.origin.To(e.origin).Len() < closest {
+							closestEntity = player.origin.To(e.origin)
+							closest = closestEntity.Len()
+						}
+					}
+					if closestEntity != (pixel.Vec{}) && closestEntity.Len() < 400 {
+						aim = closestEntity
+					}
+				} else if win.Pressed(pixelgl.MouseButton1) || win.Pressed(pixelgl.KeyLeftSuper) {
 					scaledX := (win.MousePosition().X - (win.Bounds().W() / 2)) * (canvas.Bounds().W() / win.Bounds().W())
 					scaledY := (win.MousePosition().Y - (win.Bounds().H() / 2)) * (canvas.Bounds().H() / win.Bounds().H())
 					mp := pixel.V(scaledX, scaledY).Add(camPos)
@@ -2056,6 +2272,7 @@ func run() {
 			player.relativeTarget = aim.Unit()
 
 			// set velocities
+			closestEnemyDist := 1000000.0
 			for i, e := range game.data.entities {
 				if !e.alive {
 					continue
@@ -2069,8 +2286,11 @@ func run() {
 					continue
 				}
 
-				toPlayer := e.origin.To(player.origin).Unit()
-				dir := toPlayer
+				toPlayer := e.origin.To(player.origin)
+				dir := toPlayer.Unit()
+				if (e.entityType == "blackhole" || e.entityType == "bubble") && toPlayer.Len() < closestEnemyDist {
+					closestEnemyDist = toPlayer.Len()
+				}
 				if e.entityType == "wanderer" {
 					if e.target.Len() == 0 || e.origin.To(e.target).Len() < 5.0 {
 						poi := pixel.V(
@@ -2105,7 +2325,7 @@ func run() {
 								debugInfos = append(debugInfos, debugInfo{p1: e.origin, p2: b.data.origin})
 							}
 
-							baseVelocity := entToBullet.Unit().Scaled(-4)
+							baseVelocity := entToBullet.Unit().Scaled(-4 * game.data.timescale)
 
 							midColor := pixel.ToRGBA(color.RGBA{64, 232, 64, 192})
 							pos1 := pixel.V(1, 1).Rotated(e.orientation.Angle()).Scaled(e.radius).Add(e.origin)
@@ -2147,6 +2367,7 @@ func run() {
 
 				game.data.entities[i] = e
 			}
+			game.data.timescale = math.Max(0.1, math.Min(256, closestEnemyDist)/256.0)
 
 			for i, b := range game.data.bullets {
 				if !b.data.alive {
@@ -2175,7 +2396,7 @@ func run() {
 				// emit particles
 				if (uint64(totalTime*1000)/125)%2 == 0 {
 					v := 6.0 + (rand.Float64() * 12)
-					sprayVelocity := pixel.V(math.Cos(b.particleEmissionAngle), math.Sin(b.particleEmissionAngle)).Unit().Scaled(v)
+					sprayVelocity := pixel.V(math.Cos(b.particleEmissionAngle), math.Sin(b.particleEmissionAngle)).Unit().Scaled(v * game.data.timescale)
 					color := colornames.Lightskyblue
 					pos := b.origin
 					game.data.particles = append(
@@ -2352,7 +2573,7 @@ func run() {
 					intersection := a.MovementCollisionCircle().Intersect(b.MovementCollisionCircle())
 					if intersection.Radius > 0 {
 						a.origin = a.origin.Add(
-							b.origin.To(a.origin).Unit().Scaled(intersection.Radius * 0.1),
+							b.origin.To(a.origin).Unit().Scaled(intersection.Radius * dt),
 						)
 						game.data.entities[id] = a
 					}
@@ -2367,6 +2588,16 @@ func run() {
 							b.data.alive = false
 							game.data.bullets[bID] = b
 
+							if e.entityType == "blackhole" {
+								hitSound := blackholeHitBuffer.Streamer(0, blackholeHitBuffer.Len())
+								volume := &effects.Volume{
+									Streamer: hitSound,
+									Base:     10,
+									Volume:   -1.4,
+									Silent:   false,
+								}
+								speaker.Play(volume)
+							}
 							entsToAdd = e.DealDamage(eID, 1, last, game, entsToAdd, player)
 
 							game.data.entities[eID] = e
@@ -2510,97 +2741,7 @@ func run() {
 			}
 			game.data.bullets = newBullets
 
-			// spawn entities
-			// This is a long procedure to allow spawning enemies for test purposes
-			if debug {
-				scaledX := (win.MousePosition().X - (win.Bounds().W() / 2)) * (canvas.Bounds().W() / win.Bounds().W())
-				scaledY := (win.MousePosition().Y - (win.Bounds().H() / 2)) * (canvas.Bounds().H() / win.Bounds().H())
-				mp := pixel.V(scaledX, scaledY).Add(camPos)
-
-				if win.JustPressed(pixelgl.KeyJ) {
-					enemy := *NewWanderer(
-						mp.X,
-						mp.Y,
-					)
-					game.data.entities = append(game.data.entities, enemy)
-				}
-				if win.JustPressed(pixelgl.KeyK) {
-					enemy := *NewFollower(
-						mp.X,
-						mp.Y,
-					)
-					game.data.entities = append(game.data.entities, enemy)
-				}
-				if win.JustPressed(pixelgl.KeyL) {
-					enemy := *NewDodger(
-						mp.X,
-						mp.Y,
-					)
-					game.data.entities = append(game.data.entities, enemy)
-				}
-				if win.JustPressed(pixelgl.KeySemicolon) {
-					enemy := *NewPinkSquare(
-						mp.X,
-						mp.Y,
-					)
-					game.data.entities = append(game.data.entities, enemy)
-				}
-				if win.JustPressed(pixelgl.KeyRightBracket) {
-					enemy := *NewSnek(
-						mp.X,
-						mp.Y,
-					)
-					game.data.entities = append(game.data.entities, enemy)
-				}
-				if win.JustPressed(pixelgl.KeyApostrophe) {
-					enemy := *NewBlackHole(
-						mp.X,
-						mp.Y,
-					)
-					game.data.entities = append(game.data.entities, enemy)
-				}
-
-				total := 16.0
-				step := 360.0 / total
-				if win.JustPressed(pixelgl.KeyN) {
-					for i := 0.0; i < total; i++ {
-						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-						enemy := *NewWanderer(spawnPos.X, spawnPos.Y)
-						game.data.entities = append(game.data.entities, enemy)
-					}
-				}
-				if win.JustPressed(pixelgl.KeyM) {
-					for i := 0.0; i < total; i++ {
-						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-						enemy := *NewFollower(spawnPos.X, spawnPos.Y)
-						game.data.entities = append(game.data.entities, enemy)
-					}
-				}
-				if win.JustPressed(pixelgl.KeyComma) {
-					for i := 0.0; i < total; i++ {
-						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-						enemy := *NewDodger(spawnPos.X, spawnPos.Y)
-						game.data.entities = append(game.data.entities, enemy)
-					}
-				}
-				if win.JustPressed(pixelgl.KeyPeriod) {
-					for i := 0.0; i < total; i++ {
-						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-						enemy := *NewPinkSquare(spawnPos.X, spawnPos.Y)
-						game.data.entities = append(game.data.entities, enemy)
-					}
-				}
-				if win.JustPressed(pixelgl.KeySlash) {
-					for i := 0.0; i < total; i++ {
-						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-						enemy := *NewBlackHole(spawnPos.X, spawnPos.Y)
-						game.data.entities = append(game.data.entities, enemy)
-					}
-				}
-
-			}
-
-			if game.data.mode == "evolved" {
+			if game.data.mode == "evolved" || game.data.mode == "menu_game" {
 				game.evolvedGameModeUpdate(debug, last, totalTime, player)
 			} else if game.data.mode == "pacifism" {
 				game.pacifismGameModeUpdate(debug, last, totalTime, player)
@@ -2609,73 +2750,77 @@ func run() {
 
 		// draw
 		imd.Clear()
-		if game.state == "playing" {
 
-			// Draw the grid effect
-			// TODO, extract?
-			// Add catmullrom splines?
-			{
-				width := len(game.grid.points)
-				height := len(game.grid.points[0])
-				imd.SetColorMask(pixel.Alpha(0.4))
-				imd.Color = color.RGBA{30, 30, 139, 255} // The alpha component here doesn't seem to be respected :/
+		if game.state == "paused" || game.data.mode == "menu_game" {
+			canvas.SetColorMask(pixel.Alpha(0.5))
+		} else {
+			canvas.SetColorMask(pixel.Alpha(1.0))
+		}
 
-				for y := 0; y < height; y++ {
-					for x := 0; x < width; x++ {
-						left, up := pixel.ZV, pixel.ZV
-						p := game.grid.points[x][y].origin.ToVec2(cfg.Bounds)
+		// Draw the grid effect
+		// TODO, extract?
+		// Add catmullrom splines?
+		if game.data.mode == "evolved" || game.data.mode == "pacifism" || game.data.mode == "menu_game" {
+			width := len(game.grid.points)
+			height := len(game.grid.points[0])
+			imd.SetColorMask(pixel.Alpha(0.4))
+			imd.Color = color.RGBA{30, 30, 139, 255} // The alpha component here doesn't seem to be respected :/
 
-						// fmt.Printf("Drawing point %f %f\n", p.X, p.Y)
-						if x > 0 {
-							left = game.grid.points[x-1][y].origin.ToVec2(cfg.Bounds)
-							if withinWorld(p) || withinWorld(left) {
-								// It's possible that one but not the other point is brought in from out of the world boundary
-								// If being brought in from out of the world, render right on the border
-								enforceWorldBoundary(&p, 0.0)
-								enforceWorldBoundary(&left, 0.0)
-								thickness := 1.0
-								if y%2 == 0 {
-									thickness = 4.0
-								}
-								imd.Push(left, p)
-								imd.Line(thickness)
+			for y := 0; y < height; y++ {
+				for x := 0; x < width; x++ {
+					left, up := pixel.ZV, pixel.ZV
+					p := game.grid.points[x][y].origin.ToVec2(cfg.Bounds)
+
+					// fmt.Printf("Drawing point %f %f\n", p.X, p.Y)
+					if x > 0 {
+						left = game.grid.points[x-1][y].origin.ToVec2(cfg.Bounds)
+						if withinWorld(p) || withinWorld(left) {
+							// It's possible that one but not the other point is brought in from out of the world boundary
+							// If being brought in from out of the world, render right on the border
+							enforceWorldBoundary(&p, 0.0)
+							enforceWorldBoundary(&left, 0.0)
+							thickness := 1.0
+							if y%2 == 0 {
+								thickness = 4.0
 							}
+							imd.Push(left, p)
+							imd.Line(thickness)
 						}
-						if y > 0 {
-							up = game.grid.points[x][y-1].origin.ToVec2(cfg.Bounds)
-							if withinWorld(p) || withinWorld(up) {
-								// It's possible that one but not the other point is brought in from out of the world boundary
-								// If being brought in from out of the world, render right on the border
-								enforceWorldBoundary(&p, 0.0)
-								enforceWorldBoundary(&up, 0.0)
-								thickness := 1.0
-								if x%2 == 0 {
-									thickness = 4.0
-								}
-								imd.Push(up, p)
-								imd.Line(thickness)
+					}
+					if y > 0 {
+						up = game.grid.points[x][y-1].origin.ToVec2(cfg.Bounds)
+						if withinWorld(p) || withinWorld(up) {
+							// It's possible that one but not the other point is brought in from out of the world boundary
+							// If being brought in from out of the world, render right on the border
+							enforceWorldBoundary(&p, 0.0)
+							enforceWorldBoundary(&up, 0.0)
+							thickness := 1.0
+							if x%2 == 0 {
+								thickness = 4.0
 							}
+							imd.Push(up, p)
+							imd.Line(thickness)
+						}
+					}
+
+					if x > 0 && y > 0 {
+						upLeft := game.grid.points[x-1][y-1].origin.ToVec2(cfg.Bounds)
+						p1, p2 := upLeft.Add(up).Scaled(0.5), left.Add(p).Scaled(0.5)
+
+						if withinWorld(p1) || withinWorld(p2) {
+							enforceWorldBoundary(&p1, 0.0)
+							enforceWorldBoundary(&p2, 0.0)
+							imd.Push(p1, p2)
+							imd.Line(1.0)
 						}
 
-						if x > 0 && y > 0 {
-							upLeft := game.grid.points[x-1][y-1].origin.ToVec2(cfg.Bounds)
-							p1, p2 := upLeft.Add(up).Scaled(0.5), left.Add(p).Scaled(0.5)
+						p3, p4 := upLeft.Add(left).Scaled(0.5), up.Add(p).Scaled(0.5)
 
-							if withinWorld(p1) || withinWorld(p2) {
-								enforceWorldBoundary(&p1, 0.0)
-								enforceWorldBoundary(&p2, 0.0)
-								imd.Push(p1, p2)
-								imd.Line(1.0)
-							}
-
-							p3, p4 := upLeft.Add(left).Scaled(0.5), up.Add(p).Scaled(0.5)
-
-							if withinWorld(p3) || withinWorld(p4) {
-								enforceWorldBoundary(&p3, 0.0)
-								enforceWorldBoundary(&p4, 0.0)
-								imd.Push(p3, p4)
-								imd.Line(1.0)
-							}
+						if withinWorld(p3) || withinWorld(p4) {
+							enforceWorldBoundary(&p3, 0.0)
+							enforceWorldBoundary(&p4, 0.0)
+							imd.Push(p3, p4)
+							imd.Line(1.0)
 						}
 					}
 				}
@@ -2934,6 +3079,9 @@ func run() {
 		bloom3.Draw(win, pixel.IM.Moved(bloom2.Bounds().Center()))
 		canvas.Draw(win, pixel.IM.Moved(canvas.Bounds().Center()))
 
+		imd.Clear()
+		imd.Color = colornames.Orange
+		uiCanvas.Clear(colornames.Black)
 		if game.state == "playing" {
 			scoreTxt.Clear()
 			txt := "Score: %d\n"
@@ -2948,7 +3096,7 @@ func run() {
 				fmt.Fprintln(scoreTxt, txt)
 
 				txt = "Timescale: %.2f\n"
-				fmt.Fprintf(scoreTxt, txt, timeScale)
+				fmt.Fprintf(scoreTxt, txt, game.data.timescale)
 
 				txt = "Entities: %d\n"
 				fmt.Fprintf(scoreTxt, txt, len(game.data.entities))
@@ -2959,7 +3107,7 @@ func run() {
 
 			scoreTxt.Draw(
 				win,
-				pixel.IM.Scaled(scoreTxt.Orig, 2),
+				pixel.IM.Scaled(scoreTxt.Orig, 1),
 			)
 
 			livesTxt.Clear()
@@ -2972,84 +3120,92 @@ func run() {
 
 			livesTxt.Draw(
 				win,
-				pixel.IM.Scaled(livesTxt.Orig, 2),
+				pixel.IM.Scaled(livesTxt.Orig, 1),
 			)
 		} else if game.state == "paused" {
-			centeredTxt.Color = color.RGBA64{255, 255, 255, 255}
-			centeredTxt.Draw(
+			titleTxt.Clear()
+			titleTxt.Orig = pixel.V(0.0, 128.0)
+			titleTxt.Dot.X -= titleTxt.BoundsOf(gameTitle).W() / 2
+			fmt.Fprintln(titleTxt, gameTitle)
+			titleTxt.Draw(
 				win,
 				pixel.IM.Scaled(
-					centeredTxt.Orig,
-					5,
+					titleTxt.Orig,
+					2,
 				),
 			)
-		} else if game.state == "start_screen" {
-			// fadeEffect := (totalTime - 4.0) / 2.0
-			// if fadeEffect < 0.0 {
-			// 	fadeEffect = 0.0
-			// }
-			// a := 224 - (224 * fadeEffect)
+			imd.Push(
+				titleTxt.Orig.Add(pixel.V(-128, -18.0)),
+				titleTxt.Orig.Add(pixel.V(128, -18.0)),
+			)
+			imd.Line(1.0)
+
+			centeredTxt.Orig = pixel.V(-96, 64)
+			centeredTxt.Clear()
+			for _, item := range game.menu.options {
+				if item == game.menu.options[game.menu.selection] {
+					imd.Push(centeredTxt.Dot.Add(pixel.V(-12.0, (centeredTxt.LineHeight/2.0)-4)))
+					imd.Circle(2.0, 4.0)
+				}
+				fmt.Fprintln(centeredTxt, item)
+			}
+
 			// centeredTxt.Color = color.RGBA64{255, 255, 255, 255}
 			centeredTxt.Draw(
 				win,
+				pixel.IM.Scaled(centeredTxt.Orig, 1),
+			)
+		} else if game.state == "start_screen" {
+			titleTxt.Clear()
+			line := gameTitle
+
+			titleTxt.Orig = pixel.Lerp(
+				pixel.V(0.0, -400), pixel.V(0.0, 128.0), totalTime/6.0,
+			)
+			titleTxt.Dot.X -= (titleTxt.BoundsOf(line).W() / 2)
+			fmt.Fprintln(titleTxt, line)
+			if totalTime > 6.0 {
+				game.state = "main_menu"
+			}
+			titleTxt.Draw(
+				win,
 				pixel.IM.Scaled(
-					centeredTxt.Orig,
+					titleTxt.Orig,
 					5,
 				),
 			)
 		} else if game.state == "main_menu" {
-			play := text.New(pixel.V(0, 0), basicFont)
-			line := "Play: Evolved" // localisation with a dictionary probs
-			playSize := 2.0
-			if game.menu.options[game.menu.selection] == "Play: Evolved" {
-				playSize = 3.0
-			}
-
-			play.Orig = pixel.V(0.0, -256.0/playSize)
-			play.Dot.X -= (play.BoundsOf(line).W() / 2)
-			fmt.Fprintln(play, line)
-			play.Draw(
+			titleTxt.Clear()
+			titleTxt.Orig = pixel.V(0.0, 128.0)
+			titleTxt.Dot.X -= titleTxt.BoundsOf(gameTitle).W() / 2
+			fmt.Fprintln(titleTxt, gameTitle)
+			titleTxt.Draw(
 				win,
 				pixel.IM.Scaled(
-					play.Orig,
-					playSize,
+					titleTxt.Orig,
+					2,
 				),
 			)
-
-			play2 := text.New(pixel.V(0, 0), basicFont)
-			line = "Play: Pacifism" // localisation with a dictionary probs
-			playSize = 2.0
-			if game.menu.options[game.menu.selection] == "Play: Pacifism" {
-				playSize = 3.0
-			}
-
-			play2.Orig = pixel.V(0.0, -128.0/playSize)
-			play2.Dot.X -= (play2.BoundsOf(line).W() / 2)
-			fmt.Fprintln(play2, line)
-			play2.Draw(
-				win,
-				pixel.IM.Scaled(
-					play2.Orig,
-					playSize,
-				),
+			imd.Push(
+				titleTxt.Orig.Add(pixel.V(-128, -18.0)),
+				titleTxt.Orig.Add(pixel.V(128, -18.0)),
 			)
+			imd.Line(1.0)
 
-			quit := text.New(pixel.V(0, 0), basicFont)
-			quitTxt := "Quit" // localisation with a dictionary probs
-			quitSize := 2.0
-			if game.menu.options[game.menu.selection] == "Quit" {
-				quitSize = 4.0
+			centeredTxt.Orig = pixel.V(-96, 64)
+			centeredTxt.Clear()
+			for _, item := range game.menu.options {
+				if item == game.menu.options[game.menu.selection] {
+					imd.Push(centeredTxt.Dot.Add(pixel.V(-8.0, (centeredTxt.LineHeight/2.0)-4.0)))
+					imd.Circle(2.0, 4.0)
+				}
+				fmt.Fprintln(centeredTxt, item)
 			}
 
-			quit.Orig = pixel.V(0.0, 0)
-			quit.Dot.X -= (quit.BoundsOf(quitTxt).W() / 2)
-			fmt.Fprintln(quit, quitTxt)
-			quit.Draw(
+			// centeredTxt.Color = color.RGBA64{255, 255, 255, 255}
+			centeredTxt.Draw(
 				win,
-				pixel.IM.Scaled(
-					quit.Orig,
-					quitSize,
-				),
+				pixel.IM.Scaled(centeredTxt.Orig, 1),
 			)
 		} else if game.state == "game_over" {
 			gameOverTxt.Draw(
@@ -3060,6 +3216,8 @@ func run() {
 				),
 			)
 		}
+		imd.Draw(uiCanvas)
+		uiCanvas.Draw(win, pixel.IM.Moved(uiCanvas.Bounds().Center()))
 
 		win.Update()
 	}

@@ -19,7 +19,10 @@ var spawnBuffer2 *beep.Buffer
 var spawnBuffer3 *beep.Buffer
 var spawnBuffer4 *beep.Buffer
 var spawnBuffer5 *beep.Buffer
+var pinkSquareSpawnBuffer *beep.Buffer
 var snakeSpawnBuffer *beep.Buffer
+var blackholeHitBuffer *beep.Buffer
+var blackholeDieBuffer *beep.Buffer
 var lifeBuffer *beep.Buffer
 var multiplierBuffer *beep.Buffer
 var multiplierBuffer2 *beep.Buffer
@@ -36,6 +39,7 @@ var multiplierSounds map[int]*beep.Buffer
 
 var bombBuffer *beep.Buffer
 var musicStreamer *beep.StreamSeekCloser
+var menuMusicStreamer *beep.StreamSeekCloser
 var introStreamer *beep.StreamSeekCloser
 
 func prepareStreamer(file string) (*beep.StreamSeekCloser, *beep.Format) {
@@ -74,6 +78,10 @@ func init() {
 	spawnBuffer5, _ = prepareBuffer("sound/spawn5.mp3")
 	snakeSpawnBuffer, _ = prepareBuffer("sound/snakespawn.mp3")
 
+	pinkSquareSpawnBuffer, _ = prepareBuffer("sound/snakespawn.mp3")
+	blackholeHitBuffer, _ = prepareBuffer("sound/blackholehit.mp3")
+	blackholeDieBuffer, _ = prepareBuffer("sound/blackholedie.mp3")
+
 	lifeBuffer, _ = prepareBuffer("sound/life.mp3")
 	multiplierBuffer, _ = prepareBuffer("sound/multiplierbonus.mp3")
 	multiplierBuffer2, _ = prepareBuffer("sound/multiplierbonus2.mp3")
@@ -99,6 +107,7 @@ func init() {
 	bombBuffer, _ = prepareBuffer("sound/usebomb.mp3")
 
 	musicStreamer, soundFormat = prepareStreamer("sound/music.mp3")
+	menuMusicStreamer, soundFormat = prepareStreamer("sound/menumusic.mp3")
 	introStreamer, soundFormat = prepareStreamer("sound/intro.mp3")
 	speaker.Init(soundFormat.SampleRate, soundFormat.SampleRate.N(time.Second/10))
 }
@@ -106,6 +115,13 @@ func init() {
 func playIntroMusic() {
 	speaker.Clear()
 	s := *introStreamer
+	speaker.Play(s)
+	// defer s.Close()
+}
+
+func playMenuMusic() {
+	speaker.Clear()
+	s := *menuMusicStreamer
 	speaker.Play(s)
 	// defer s.Close()
 }
