@@ -115,6 +115,7 @@ func init() {
 func playIntroMusic() {
 	speaker.Clear()
 	s := *introStreamer
+	s.Seek(0)
 	speaker.Play(s)
 	// defer s.Close()
 }
@@ -122,6 +123,7 @@ func playIntroMusic() {
 func playMenuMusic() {
 	speaker.Clear()
 	s := *menuMusicStreamer
+	s.Seek(0)
 	speaker.Play(s)
 	// defer s.Close()
 }
@@ -129,6 +131,7 @@ func playMenuMusic() {
 func playMusic() {
 	speaker.Clear()
 	s := *musicStreamer
+	s.Seek(0)
 	speaker.Play(s)
 	// defer s.Close()
 }

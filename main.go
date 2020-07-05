@@ -377,6 +377,7 @@ type entityData struct {
 	orientation            pixel.Vec // current rotation
 	origin                 pixel.Vec
 	velocity               pixel.Vec
+	pullVec                pixel.Vec // for drawing graphics
 	speed                  float64
 	acceleration           float64
 	friction               float64
@@ -389,6 +390,7 @@ type entityData struct {
 	alive                  bool
 	entityType             string
 	text                   *text.Text
+	color                  color.Color
 	hp                     int
 	movementColliderRadius float64
 
@@ -477,9 +479,17 @@ func (e *entityData) IntersectWithPlayer(eID int, game *game, player *entityData
 			if game.data.lives == 0 {
 				game.state = "game_over"
 
+				for entID, ent := range game.data.entities {
+					if !ent.alive {
+						continue
+					}
+					ent.alive = false
+					game.data.entities[entID] = ent
+				}
+				game.data.spawning = false
+
 				gameOverTxt.Clear()
 				lines := []string{
-					"Game Over.",
 					"Score: " + fmt.Sprintf("%d", game.data.score),
 					"Press enter to restart",
 				}
@@ -488,7 +498,6 @@ func (e *entityData) IntersectWithPlayer(eID int, game *game, player *entityData
 					fmt.Fprintln(gameOverTxt, line)
 				}
 			}
-
 		}
 	}
 	game.data.entities[eID] = *e
@@ -572,7 +581,7 @@ func (e *entityData) DealDamage(eID int, amount int, currTime time.Time, game *g
 					ent.DealDamage(entID, 4, currTime, game, entsToAdd, player)
 					game.data.entities[entID] = ent
 				}
-				if dist < 250 {
+				if dist < 350 {
 					ent.velocity = ent.velocity.Add(dirV)
 				}
 				game.data.entities[entID] = ent
@@ -810,6 +819,7 @@ func NewPlayer(x float64, y float64) *entityData {
 func NewFollower(x float64, y float64) *entityData {
 	e := NewEntity(x, y, 44.0, 280, "follower")
 	e.spawnSound = spawnBuffer
+	e.color = colornames.Deepskyblue
 	e.volume = -0.3
 	e.bounty = 50
 	e.movementColliderRadius = 24.0
@@ -819,6 +829,7 @@ func NewFollower(x float64, y float64) *entityData {
 func NewWanderer(x float64, y float64) *entityData {
 	w := NewEntity(x, y, 44.0, 200, "wanderer")
 	w.spawnSound = spawnBuffer4
+	w.color = colornames.Mediumpurple
 	w.volume = -0.4
 	w.acceleration = 1
 	w.bounty = 25
@@ -828,6 +839,7 @@ func NewWanderer(x float64, y float64) *entityData {
 func NewDodger(x float64, y float64) *entityData {
 	w := NewEntity(x, y, 44.0, 380, "dodger")
 	w.spawnSound = spawnBuffer2
+	w.color = colornames.Limegreen
 	w.acceleration = 2.0
 	w.friction = 0.95
 	w.bounty = 100
@@ -838,6 +850,7 @@ func NewPinkSquare(x float64, y float64) *entityData {
 	w := NewEntity(x, y, 44.0, 460, "pink")
 	w.spawnSound = spawnBuffer5
 	w.acceleration = 1.0
+	w.color = colornames.Hotpink
 	w.friction = 0.98
 	w.bounty = 100
 	return w
@@ -848,6 +861,7 @@ func NewPinkPleb(x float64, y float64) *entityData {
 	// w.spawnSound = spawnBuffer4
 	w.virtualOrigin = pixel.V(x, y)
 	w.origin = w.virtualOrigin.Add(pixel.V(48.0, 0.0))
+	w.color = colornames.Hotpink
 	w.spawnTime = 0.0
 	w.spawning = false
 	w.bounty = 75
@@ -858,6 +872,7 @@ func NewSnek(x float64, y float64) *entityData {
 	s := NewEntity(x, y, 30.0, 280, "snek")
 	s.spawnTime = 0.0
 	s.spawning = false
+	s.color = colornames.Deepskyblue
 	s.spawnSound = snakeSpawnBuffer
 	s.volume = -0.8
 	s.cone = 30 + (rand.Float64() * 90.0)
@@ -881,6 +896,7 @@ func NewAngryBubble(x float64, y float64) *entityData {
 func NewBlackHole(x float64, y float64) *entityData {
 	b := NewEntity(x, y, 40.0, 0.0, "blackhole")
 	b.bounty = 150
+	// b.color = colornames.Red
 	b.spawnSound = spawnBuffer3
 	b.volume = -0.6
 	b.hp = 10
@@ -960,6 +976,7 @@ type gamedata struct {
 	timescale         float64
 	spawning          bool
 
+	gameStart         time.Time
 	lastSpawn         time.Time
 	lastBullet        time.Time
 	lastBomb          time.Time
@@ -975,11 +992,12 @@ type game struct {
 }
 
 // Menus
+var implementedMenuItems = []string{"Quick Play: Evolved", "Quick Play: Pacifism", "Quit"}
 
 func NewMainMenu() menu {
 	return menu{
-		selection: 0,
-		options:   []string{"Play: Evolved", "Play: Pacifism", "Options", "Quit"},
+		selection: 1,
+		options:   []string{"Story Mode", "Quick Play: Evolved", "Quick Play: Pacifism", "Leaderboard", "Achievements", "Options", "Quit"},
 	}
 }
 
@@ -1049,6 +1067,7 @@ func NewGameData() *gamedata {
 	gameData.lastBomb = time.Now()
 	gameData.lastWeaponUpgrade = time.Time{}
 	gameData.lastWave = time.Time{}
+	gameData.gameStart = time.Now()
 	gameData.timescale = 1.0
 
 	return gameData
@@ -1069,10 +1088,25 @@ func NewMenuGame() *gamedata {
 	return data
 }
 
+func NewStoryGame() *gamedata {
+	data := NewGameData()
+	data.mode = "story"
+	data.weapon = *NewWeaponData()
+	data.multiplierReward = 25 // kills
+	data.lifeReward = 75000
+	data.bombReward = 100000
+	data.waveFreq = 30 // waves have a duration so can influence the pace of the game
+	data.weaponUpgradeFreq = 30
+	data.landingPartyFreq = 10 // more strategic one-off spawn systems
+	data.ambientSpawnFreq = 3  // ambient spawning can be toggled off temporarily, but is otherwise always going on
+	return data
+}
+
 func NewEvolvedGame() *gamedata {
 	data := NewGameData()
 	data.mode = "evolved"
 	data.weapon = *NewWeaponData()
+	data.lives = 3
 	data.multiplierReward = 25 // kills
 	data.lifeReward = 75000
 	data.bombReward = 100000
@@ -1086,6 +1120,7 @@ func NewEvolvedGame() *gamedata {
 func NewPacifismGame() *gamedata {
 	data := NewGameData()
 	data.mode = "pacifism"
+	data.lives = 1
 	data.spawnCount = 3
 	data.ambientSpawnFreq = 2 // ambient spawning can be toggled off temporarily, but is otherwise always going on
 	return data
@@ -1093,7 +1128,7 @@ func NewPacifismGame() *gamedata {
 
 func NewGame() *game {
 	game := new(game)
-	game.state = "start_screen"
+	game.state = "main_menu"
 	game.data = *NewGameData()
 	game.menu = NewMainMenu()
 
@@ -1827,7 +1862,7 @@ func run() {
 	basicFont = text.NewAtlas(normalFace, text.ASCII)
 
 	titleTxt := text.New(pixel.V(0, 128), titleFont)
-	gameOverTxt := text.New(pixel.V(0, 0), basicFont)
+	gameOverTxt := text.New(pixel.V(0, 64), basicFont)
 	centeredTxt := text.New(pixel.V(0, 0), basicFont)
 	scoreTxt := text.New(pixel.V(-(win.Bounds().W()/2)+120, (win.Bounds().H()/2)-50), basicFont)
 	livesTxt := text.New(pixel.V(0.0, (win.Bounds().H()/2)-50), basicFont)
@@ -1844,11 +1879,18 @@ func run() {
 
 	game := NewGame()
 
+	lastMenuChoice := time.Now()
+
 	// precache player draw
 	drawShip(playerDraw)
-	playIntroMusic()
+	// playIntroMusic()
 	debugInfos := []debugInfo{}
 	totalTime := 0.0
+
+	playMenuMusic()
+	game.menu = NewMainMenu()
+	game.data = *NewMenuGame()
+
 	for !win.Closed() {
 		if game.state == "quitting" {
 			win.SetClosed(true)
@@ -1876,11 +1918,15 @@ func run() {
 
 		if game.state == "main_menu" {
 			if win.JustPressed(pixelgl.KeyEnter) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonA) {
-				if game.menu.options[game.menu.selection] == "Play: Evolved" {
+				if game.menu.options[game.menu.selection] == "Story Mode" {
+					game.state = "starting"
+					game.data = *NewStoryGame()
+				}
+				if game.menu.options[game.menu.selection] == "Quick Play: Evolved" {
 					game.state = "starting"
 					game.data = *NewEvolvedGame()
 				}
-				if game.menu.options[game.menu.selection] == "Play: Pacifism" {
+				if game.menu.options[game.menu.selection] == "Quick Play: Pacifism" {
 					game.state = "starting"
 					game.data = *NewPacifismGame()
 				}
@@ -1889,14 +1935,37 @@ func run() {
 				}
 			}
 
-			if win.JustPressed(pixelgl.KeyUp) {
+			gamePadDir := pixel.Vec{}
+			if win.JoystickPresent(currJoystick) {
+				moveVec := thumbstickVector(
+					win,
+					currJoystick,
+					pixelgl.AxisLeftX,
+					pixelgl.AxisLeftY,
+				)
+				gamePadDir = moveVec
+			}
+
+			if last.Sub(lastMenuChoice).Seconds() > 0.125 && (win.JustPressed(pixelgl.KeyUp) || gamePadDir.Y > 0.7) {
 				game.menu.selection = (game.menu.selection - 1) % len(game.menu.options)
 				if game.menu.selection < 0 {
 					// would have thought modulo would handle negatives. /shrug
 					game.menu.selection += len(game.menu.options)
 				}
-			} else if win.JustPressed(pixelgl.KeyDown) {
+				for !sliceextra.Contains(implementedMenuItems, game.menu.options[game.menu.selection]) {
+					game.menu.selection = (game.menu.selection - 1) % len(game.menu.options)
+					if game.menu.selection < 0 {
+						// would have thought modulo would handle negatives. /shrug
+						game.menu.selection += len(game.menu.options)
+					}
+				}
+				lastMenuChoice = time.Now()
+			} else if last.Sub(lastMenuChoice).Seconds() > 0.125 && (win.JustPressed(pixelgl.KeyDown) || gamePadDir.Y < -0.7) {
 				game.menu.selection = (game.menu.selection + 1) % len(game.menu.options)
+				for !sliceextra.Contains(implementedMenuItems, game.menu.options[game.menu.selection]) {
+					game.menu.selection = (game.menu.selection + 1) % len(game.menu.options)
+				}
+				lastMenuChoice = time.Now()
 			}
 		}
 
@@ -1904,6 +1973,7 @@ func run() {
 			if win.JustPressed(pixelgl.KeyEnter) || win.JustPressed(pixelgl.KeyEscape) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonA) {
 				game.state = "main_menu"
 				playMenuMusic()
+				game.menu = NewMainMenu()
 				game.data = *NewMenuGame()
 			}
 		}
@@ -1936,12 +2006,31 @@ func run() {
 		}
 
 		if game.state == "starting" {
-			playMusic()
+			if game.data.mode == "evolved" {
+				game.data = *NewEvolvedGame()
+				playMusic()
+			} else {
+				game.data = *NewPacifismGame()
+				playMenuMusic()
+			}
+
 			game.state = "playing"
 		}
 
-		if ((game.state == "playing" && debug) || game.state == "game_over") && win.Pressed(pixelgl.KeyEnter) || win.JoystickPressed(currJoystick, pixelgl.ButtonA) {
+		playerConfirmed := (win.Pressed(pixelgl.KeyEnter) || win.JoystickPressed(currJoystick, pixelgl.ButtonA))
+		playerCancelled := win.JustPressed(pixelgl.KeyEscape) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonB)
+		if (game.state == "playing" && debug) && playerConfirmed {
 			game.state = "starting"
+		}
+		if game.state == "game_over" {
+			if playerConfirmed {
+				game.state = "starting"
+			} else if playerCancelled {
+				game.state = "main_menu"
+				playMenuMusic()
+				game.menu = NewMainMenu()
+				game.data = *NewMenuGame()
+			}
 		}
 
 		direction := pixel.ZV
@@ -2097,7 +2186,7 @@ func run() {
 			}
 		}
 
-		if game.state == "playing" || game.data.mode == "menu_game" {
+		if game.state == "playing" || game.state == "game_over" || game.data.mode == "menu_game" {
 			if game.data.mode == "menu_game" {
 				if player.target.Len() == 0 || player.origin.To(player.target).Len() < 5.0 {
 					poi := pixel.V(
@@ -2286,8 +2375,11 @@ func run() {
 					continue
 				}
 
+				dir := pixel.ZV
 				toPlayer := e.origin.To(player.origin)
-				dir := toPlayer.Unit()
+				if player.alive {
+					dir = toPlayer.Unit()
+				}
 				if (e.entityType == "blackhole" || e.entityType == "bubble") && toPlayer.Len() < closestEnemyDist {
 					closestEnemyDist = toPlayer.Len()
 				}
@@ -2387,6 +2479,11 @@ func run() {
 
 			// Process blackholes
 			// I don't really care about efficiency atm
+			for eID, e := range game.data.entities {
+				e.pullVec = pixel.ZV // reset the pull vec (which is used for drawing effects related to the pull)
+				game.data.entities[eID] = e
+			}
+
 			entsToAdd := make([]entityData, 0, 100)
 			for bID, b := range game.data.entities {
 				if !b.alive || b.entityType != "blackhole" || !b.active {
@@ -2409,7 +2506,7 @@ func run() {
 
 				if b.hp > 15 {
 					game.grid.ApplyExplosiveForce(b.radius*5, Vector3{b.origin.X, b.origin.Y, 0.0}, b.radius*5)
-					game.grid.ApplyDirectedForce(Vector3{b.origin.X, b.origin.Y, 100.0}, Vector3{b.origin.X, b.origin.Y, 0.0}, 50)
+					// game.grid.ApplyDirectedForce(Vector3{b.origin.X, b.origin.Y, 20.0}, Vector3{b.origin.X, b.origin.Y, 0.0}, 20)
 					b.alive = false
 					// spawn bubbles
 					for i := 0; i < 5; i++ {
@@ -2421,6 +2518,26 @@ func run() {
 						entsToAdd = append(entsToAdd, pleb)
 					}
 					game.data.entities[bID] = b
+
+					for i := 0; i < 1024; i++ {
+						extra := (1.0 / ((rand.Float64() * 10.0) + 1.0))
+						speed := 32 * (1.0 - extra)
+
+						p := NewParticle(
+							b.origin.X,
+							b.origin.Y,
+							pixel.ToRGBA(colornames.Deepskyblue).Add(pixel.Alpha(extra*3)),
+							64,
+							pixel.V(1.0, 1.0),
+							0.0,
+							randomVector(speed),
+							3.0,
+							"enemy",
+						)
+
+						game.data.particles = append(game.data.particles, p)
+					}
+
 					continue
 				}
 
@@ -2495,13 +2612,14 @@ func run() {
 						n := dist.Unit()
 
 						force := pixel.Lerp(
-							n.Scaled(maxForce), // maximum force at close distance
-							pixel.ZV,           // scale down to zero at maximum distance
-							length/300.0,       // at max distance, 1.0, = pixel.ZV
+							n.Scaled(maxForce*2.4), // maximum force at close distance
+							pixel.ZV,               // scale down to zero at maximum distance
+							length/300.0,           // at max distance, 1.0, = pixel.ZV
 						)
 						// force = force.Add(pixel.V(n.Y, -n.X).Scaled(force.Len() * 0.5)) // add a bit of orbital force
 
 						e.velocity = e.velocity.Add(force.Scaled(dt))
+						e.pullVec = e.pullVec.Add(force.Scaled(dt))
 
 						if debug {
 							debugInfos = append(debugInfos, debugInfo{
@@ -2523,6 +2641,25 @@ func run() {
 				game.data.entities[bID] = b
 			}
 			game.data.entities = append(game.data.entities, entsToAdd...)
+
+			for _, e := range game.data.entities {
+				baseVelocity := e.pullVec.Scaled(0.4)
+
+				if e.pullVec.Len() > 0 && e.color != nil {
+					midColor := pixel.ToRGBA(e.color)
+					pos1 := pixel.V(1, 1).Rotated(e.orientation.Angle()).Scaled(e.radius).Add(e.origin)
+					pos2 := pixel.V(-1, 1).Rotated(e.orientation.Angle()).Scaled(e.radius).Add(e.origin)
+					pos3 := pixel.V(1, -1).Rotated(e.orientation.Angle()).Scaled(e.radius).Add(e.origin)
+					pos4 := pixel.V(-1, -1).Rotated(e.orientation.Angle()).Scaled(e.radius).Add(e.origin)
+					game.data.particles = append(
+						game.data.particles,
+						NewParticle(pos1.X, pos1.Y, midColor, 48.0, pixel.V(0.5, 1.0), 0.0, baseVelocity.Scaled(rand.Float64()*2.0), 1.0, "enemy"),
+						NewParticle(pos2.X, pos1.Y, midColor, 48.0, pixel.V(0.5, 1.0), 0.0, baseVelocity.Scaled(rand.Float64()*2.0), 1.0, "enemy"),
+						NewParticle(pos3.X, pos1.Y, midColor, 48.0, pixel.V(0.5, 1.0), 0.0, baseVelocity.Scaled(rand.Float64()*2.0), 1.0, "enemy"),
+						NewParticle(pos4.X, pos1.Y, midColor, 48.0, pixel.V(0.5, 1.0), 0.0, baseVelocity.Scaled(rand.Float64()*2.0), 1.0, "enemy"),
+					)
+				}
+			}
 
 			game.grid.Update()
 
@@ -2557,7 +2694,9 @@ func run() {
 			}
 
 			// check for collisions
-			player.enforceWorldBoundary(false)
+			if game.data.mode != "story" {
+				player.enforceWorldBoundary(false)
+			}
 
 			for id, a := range game.data.entities {
 				//tmpTarget.Push(e.origin.Add(e.orientation.Scaled(e.radius)), e.origin.Add(e.orientation.Scaled(-e.radius)))
@@ -2634,7 +2773,7 @@ func run() {
 					intersectionTest = l.IntersectCircle(player.Circle()).Len() > 0
 				}
 
-				if e.alive && !e.spawning && intersectionTest {
+				if player.alive && e.alive && !e.spawning && intersectionTest {
 					e.IntersectWithPlayer(eID, game, player, last, entsToAdd, gameOverTxt)
 				}
 			}
@@ -2751,8 +2890,10 @@ func run() {
 		// draw
 		imd.Clear()
 
-		if game.state == "paused" || game.data.mode == "menu_game" {
-			canvas.SetColorMask(pixel.Alpha(0.5))
+		if game.state == "paused" || game.data.mode == "menu_game" || game.state == "game_over" {
+			a := (math.Min(totalTime, 4) / 8.0)
+			canvas.SetColorMask(pixel.Alpha(a))
+			uiCanvas.SetColorMask(pixel.Alpha(math.Min(1.0, a*4)))
 		} else {
 			canvas.SetColorMask(pixel.Alpha(1.0))
 		}
@@ -2825,7 +2966,9 @@ func run() {
 					}
 				}
 			}
+		}
 
+		if game.data.mode == "evolved" || game.data.mode == "pacifism" || game.data.mode == "menu_game" {
 			// draw particles
 			for _, p := range game.data.particles {
 				particleDraw.Clear()
@@ -2841,13 +2984,16 @@ func run() {
 				}
 			}
 
-			// draw player
 			imd.Color = colornames.White
 			imd.SetColorMask(pixel.Alpha(1))
-			d := imdraw.New(nil)
-			d.SetMatrix(pixel.IM.Rotated(pixel.ZV, player.orientation.Angle()-math.Pi/2).Moved(player.origin))
-			playerDraw.Draw(d)
-			d.Draw(imd)
+
+			// draw player
+			if player.alive {
+				d := imdraw.New(nil)
+				d.SetMatrix(pixel.IM.Rotated(pixel.ZV, player.orientation.Angle()-math.Pi/2).Moved(player.origin))
+				playerDraw.Draw(d)
+				d.Draw(imd)
+			}
 
 			// lastBomb := game.data.lastBomb.Sub(last).Seconds()
 			// if game.data.lastBomb.Sub(last).Seconds() < 1.0 {
@@ -2879,7 +3025,7 @@ func run() {
 
 					if e.entityType == "wanderer" {
 						tmpTarget.Clear()
-						tmpTarget.Color = colornames.Mediumpurple
+						tmpTarget.Color = e.color
 						baseTransform := pixel.IM.Rotated(pixel.ZV, e.orientation.Angle()).Moved(e.origin)
 						tmpTarget.SetMatrix(baseTransform)
 						tmpTarget.Push(
@@ -2926,7 +3072,7 @@ func run() {
 						tmpTarget.SetMatrix(pixel.IM.Rotated(e.origin, e.orientation.Angle()))
 						weight := 2.0
 						if e.entityType == "follower" {
-							tmpTarget.Color = colornames.Deepskyblue
+							tmpTarget.Color = e.color
 
 							growth := size / 10.0
 							timeSinceBorn := last.Sub(e.born).Seconds()
@@ -2943,7 +3089,7 @@ func run() {
 							tmpTarget.Polygon(weight)
 						} else if e.entityType == "pink" {
 							weight = 4.0
-							tmpTarget.Color = colornames.Hotpink
+							tmpTarget.Color = e.color
 							tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y-size), pixel.V(e.origin.X+size, e.origin.Y+size))
 							tmpTarget.Rectangle(weight)
 							tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y-size), pixel.V(e.origin.X+size, e.origin.Y+size))
@@ -2952,7 +3098,7 @@ func run() {
 							tmpTarget.Line(weight)
 						} else if e.entityType == "pinkpleb" {
 							weight = 3.0
-							tmpTarget.Color = colornames.Hotpink
+							tmpTarget.Color = e.color
 							tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y-size), pixel.V(e.origin.X+size, e.origin.Y+size))
 							tmpTarget.Rectangle(weight)
 							tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y-size), pixel.V(e.origin.X+size, e.origin.Y+size))
@@ -2966,7 +3112,7 @@ func run() {
 							tmpTarget.Circle(e.radius, weight)
 						} else if e.entityType == "dodger" {
 							weight = 3.0
-							tmpTarget.Color = colornames.Limegreen
+							tmpTarget.Color = e.color
 							tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y-size), pixel.V(e.origin.X+size, e.origin.Y+size))
 							tmpTarget.Rectangle(weight)
 							tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y), pixel.V(e.origin.X, e.origin.Y+size))
@@ -3014,7 +3160,10 @@ func run() {
 
 		canvas.Clear(colornames.Black)
 		imd.Draw(canvas)
-		mapRect.Draw(canvas)
+
+		if game.data.mode != "story" {
+			mapRect.Draw(canvas)
+		}
 
 		bloom1.Clear(colornames.Black)
 		bloom2.Clear(colornames.Black)
@@ -3038,12 +3187,12 @@ func run() {
 					text := fmt.Sprintf("%d", e.bounty*game.data.scoreMultiplier)
 					e.text.Dot.X -= (e.text.BoundsOf(text).W() / 2)
 					fmt.Fprintf(e.text, "%s", text)
-					e.text.Color = colornames.White
+					e.text.Color = colornames.Lightgoldenrodyellow
 
 					growth := (0.5 - (float64(e.expiry.Sub(last).Milliseconds()) / 300.0))
 					e.text.Draw(
 						canvas,
-						pixel.IM.Scaled(e.text.Orig, 2.0+growth),
+						pixel.IM.Scaled(e.text.Orig, 1.0-growth),
 					)
 				}
 
@@ -3180,7 +3329,7 @@ func run() {
 			titleTxt.Dot.X -= titleTxt.BoundsOf(gameTitle).W() / 2
 			fmt.Fprintln(titleTxt, gameTitle)
 			titleTxt.Draw(
-				win,
+				uiCanvas,
 				pixel.IM.Scaled(
 					titleTxt.Orig,
 					2,
@@ -3192,10 +3341,16 @@ func run() {
 			)
 			imd.Line(1.0)
 
-			centeredTxt.Orig = pixel.V(-96, 64)
+			centeredTxt.Orig = pixel.V(-112, 64)
 			centeredTxt.Clear()
 			for _, item := range game.menu.options {
+				if sliceextra.Contains(implementedMenuItems, item) {
+					centeredTxt.Color = colornames.White
+				} else {
+					centeredTxt.Color = colornames.Grey
+				}
 				if item == game.menu.options[game.menu.selection] {
+					centeredTxt.Color = colornames.Deepskyblue
 					imd.Push(centeredTxt.Dot.Add(pixel.V(-8.0, (centeredTxt.LineHeight/2.0)-4.0)))
 					imd.Circle(2.0, 4.0)
 				}
@@ -3204,15 +3359,47 @@ func run() {
 
 			// centeredTxt.Color = color.RGBA64{255, 255, 255, 255}
 			centeredTxt.Draw(
-				win,
+				uiCanvas,
 				pixel.IM.Scaled(centeredTxt.Orig, 1),
 			)
+		} else if game.state == "story_mode" {
+			// centeredTxt.Orig = pixel.V(-112, 64)
+			// centeredTxt.Clear()
+			// for _, page := range chapter1.pages {
+
+			// 		imd.Push(centeredTxt.Dot.Add(pixel.V(-8.0, (centeredTxt.LineHeight/2.0)-4.0)))
+			// 		imd.Circle(2.0, 4.0)
+			// 	fmt.Fprintln(centeredTxt, item)
+			// }
+
+			// // centeredTxt.Color = color.RGBA64{255, 255, 255, 255}
+			// centeredTxt.Draw(
+			// 	uiCanvas,
+			// 	pixel.IM.Scaled(centeredTxt.Orig, 1),
+			// )
 		} else if game.state == "game_over" {
+			titleTxt.Clear()
+			titleTxt.Orig = pixel.V(0.0, 128.0)
+			titleTxt.Dot.X -= titleTxt.BoundsOf("Game Over").W() / 2
+			fmt.Fprintln(titleTxt, "Game Over")
+			titleTxt.Draw(
+				uiCanvas,
+				pixel.IM.Scaled(
+					titleTxt.Orig,
+					2,
+				),
+			)
+			imd.Push(
+				titleTxt.Orig.Add(pixel.V(-128, -18.0)),
+				titleTxt.Orig.Add(pixel.V(128, -18.0)),
+			)
+			imd.Line(1.0)
+
 			gameOverTxt.Draw(
 				win,
 				pixel.IM.Scaled(
 					gameOverTxt.Orig,
-					4,
+					1,
 				),
 			)
 		}
