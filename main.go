@@ -26,7 +26,7 @@ import (
 )
 
 const maxParticles = 1600
-const worldWidth = 1440.0
+const worldWidth = 1500.0
 const worldHeight = 1080.0
 const gameTitle = "Starship Kepler"
 
@@ -429,6 +429,17 @@ func (e *entityData) SpawnSound() beep.Streamer {
 	}
 }
 
+func PlaySpawnSounds(spawns []entityData) {
+	playback := map[string]bool{}
+	for _, e := range spawns {
+		if playback[e.entityType] || e.spawnSound == nil {
+			continue
+		}
+		playback[e.entityType] = true
+		speaker.Play(e.SpawnSound())
+	}
+}
+
 func (e *entityData) IntersectWithPlayer(eID int, game *game, player *entityData, currTime time.Time, entsToAdd []entityData, gameOverTxt *text.Text) {
 	if e.entityType == "gate" {
 		game.grid.ApplyExplosiveForce(100, Vector3{e.origin.X, e.origin.Y, 0.0}, 100)
@@ -558,8 +569,6 @@ func (e *entityData) DealDamage(eID int, amount int, currTime time.Time, game *g
 				pleb := *NewPinkPleb(pos.X, pos.Y)
 				entsToAdd = append(entsToAdd, pleb)
 			}
-			// spawnSound := entsToAdd[0].spawnSound.Streamer(0, entsToAdd[0].spawnSound.Len())
-			// speaker.Play(spawnSound)
 		} else if e.entityType == "blackhole" {
 			game.grid.ApplyExplosiveForce(200, Vector3{e.origin.X, e.origin.Y, 0.0}, 200)
 			deathSound := blackholeDieBuffer.Streamer(0, blackholeDieBuffer.Len())
@@ -591,6 +600,7 @@ func (e *entityData) DealDamage(eID int, amount int, currTime time.Time, game *g
 		game.data.score += reward
 		game.data.scoreSinceBorn += reward
 		game.data.killsSinceBorn++
+		game.data.kills++
 	} else {
 		// still alive
 		// if black hole, emit sound particles to indicate damage
@@ -822,7 +832,7 @@ func NewFollower(x float64, y float64) *entityData {
 	e := NewEntity(x, y, 44.0, 280, "follower")
 	e.spawnSound = spawnBuffer
 	e.color = colornames.Cornflowerblue
-	e.volume = -0.3
+	e.volume = -0.6
 	e.bounty = 50
 	e.movementColliderRadius = 24.0
 	return e
@@ -843,6 +853,7 @@ func NewDodger(x float64, y float64) *entityData {
 	w.spawnSound = spawnBuffer2
 	w.color = colornames.Orange
 	w.acceleration = 2.0
+	w.volume = -0.5
 	w.friction = 0.95
 	w.bounty = 100
 	return w
@@ -852,6 +863,7 @@ func NewPinkSquare(x float64, y float64) *entityData {
 	w := NewEntity(x, y, 44.0, 460, "pink")
 	w.spawnSound = spawnBuffer5
 	w.acceleration = 1.0
+	w.volume = -0.2
 	w.color = colornames.Crimson
 	w.friction = 0.98
 	w.bounty = 100
@@ -1217,60 +1229,20 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 			spawns = append(spawns, enemy)
 		}
 
-		playback := map[string]bool{}
-		for _, e := range spawns {
-			if playback[e.entityType] || e.spawnSound == nil {
-				continue
-			}
-			playback[e.entityType] = true
-			speaker.Play(e.SpawnSound())
-		}
+		PlaySpawnSounds(spawns)
 		game.data.entities = append(game.data.entities, spawns...)
 		game.data.spawns += len(spawns)
 		game.data.lastSpawn = time.Now()
 
-		if game.data.spawns%3 == 0 && game.data.spawnCount < 4 {
-			game.data.spawnCount++
+		game.data.spawnCount = 1
+		n := int(math.Min(float64(game.data.spawns/50), 4))
+		if n > game.data.spawnCount {
+			game.data.spawnCount = n
 		}
 
-		if game.data.kills%10 == 0 {
-			game.data.notoriety += 0.1
-		}
-
-		if game.data.spawns%20 == 0 {
-			if game.data.ambientSpawnFreq > 1 {
-				game.data.ambientSpawnFreq -= 0.5
-			}
-		}
-
-		if game.data.spawns%25 == 0 {
-			if game.data.waveFreq > 5 {
-				game.data.waveFreq -= 5
-			}
-		}
-		if game.data.spawns%3 == 0 && game.data.spawnCount < 4 {
-			game.data.spawnCount++
-		}
-
-		if game.data.kills%10 == 0 {
-			game.data.notoriety += 0.1
-		}
-
-		if game.data.spawns%20 == 0 {
-			if game.data.ambientSpawnFreq > 1 {
-				game.data.ambientSpawnFreq -= 0.5
-			}
-		}
-
-		if game.data.spawns%25 == 0 {
-			if game.data.waveFreq > 5 {
-				game.data.waveFreq -= 5
-			} else if game.data.waveFreq > 2 {
-				game.data.waveFreq -= 0.25
-			} else {
-				game.data.waveFreq = 5
-			}
-		}
+		game.data.notoriety = float64(game.data.kills) / 100.0
+		game.data.ambientSpawnFreq = math.Max(1.0, 3-((float64(game.data.spawns)/30.0)*0.5))
+		game.data.waveFreq = math.Max(5.0, 30.0-(1.4*game.data.notoriety))
 	}
 
 	// wave management
@@ -1286,6 +1258,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 		// one-off landing party
 		fmt.Printf("[LandingPartySpawn] %s\n", time.Now().String())
 		r := rand.Float64() * (0.4 + math.Min(game.data.notoriety, 0.6))
+		spawns := make([]entityData, 0, game.data.spawnCount)
 		if r <= 0.1 {
 			count := 2 + rand.Intn(4)
 			for i := 0; i < count; i++ {
@@ -1294,12 +1267,8 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 					p.X,
 					p.Y,
 				)
-				game.data.entities = append(game.data.entities, *enemy)
-				game.data.spawns++
+				spawns = append(spawns, *enemy)
 			}
-
-			spawnSound := spawnBuffer.Streamer(0, spawnBuffer.Len())
-			speaker.Play(spawnSound)
 		} else if r <= 0.2 {
 			count := 2 + rand.Intn(4)
 			for i := 0; i < count; i++ {
@@ -1308,8 +1277,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 					p.X,
 					p.Y,
 				)
-				game.data.entities = append(game.data.entities, *enemy)
-				game.data.spawns++
+				spawns = append(spawns, *enemy)
 			}
 		} else if r <= 0.25 {
 			count := 8 + rand.Intn(4)
@@ -1319,8 +1287,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 					p.X,
 					p.Y,
 				)
-				game.data.entities = append(game.data.entities, *enemy)
-				game.data.spawns++
+				spawns = append(spawns, *enemy)
 			}
 		} else if r <= 0.5 {
 			r := rand.Intn(4)
@@ -1354,12 +1321,11 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 			for i := 0.0; i < total; i++ {
 				spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
 				spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(450.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-				game.data.entities = append(
-					game.data.entities,
+				spawns = append(
+					spawns,
 					*NewFollower(spawnPos.X, spawnPos.Y),
 					*NewFollower(spawnPos2.X, spawnPos2.Y),
 				)
-				game.data.spawns += 2
 			}
 		} else if r <= 0.575 {
 			total := 8.0
@@ -1367,12 +1333,11 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 			for i := 0.0; i < total; i++ {
 				spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
 				spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(450.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-				game.data.entities = append(
-					game.data.entities,
+				spawns = append(
+					spawns,
 					*NewDodger(spawnPos.X, spawnPos.Y),
 					*NewDodger(spawnPos2.X, spawnPos2.Y),
 				)
-				game.data.spawns += 2
 			}
 		} else if r <= 0.6 {
 			total := 5.0
@@ -1380,11 +1345,10 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 			for i := 0.0; i < total; i++ {
 				for j := 0; j < 16; j++ {
 					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0).Add(randomVector(16.0)).Add(player.origin)
-					game.data.entities = append(
-						game.data.entities,
+					spawns = append(
+						spawns,
 						*NewReplicator(spawnPos.X, spawnPos.Y),
 					)
-					game.data.spawns++
 				}
 			}
 		} else if r <= 0.64 {
@@ -1393,12 +1357,11 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 			for i := 0.0; i < total; i++ {
 				spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
 				spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(550.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-				game.data.entities = append(
-					game.data.entities,
+				spawns = append(
+					spawns,
 					*NewSnek(spawnPos.X, spawnPos.Y),
 					*NewSnek(spawnPos2.X, spawnPos2.Y),
 				)
-				game.data.spawns += 2
 			}
 		} else if r <= 0.67 {
 			total := 4.0
@@ -1406,12 +1369,11 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 			for i := 0.0; i < total; i++ {
 				spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(450.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
 				spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-				game.data.entities = append(
-					game.data.entities,
+				spawns = append(
+					spawns,
 					*NewPinkSquare(spawnPos.X, spawnPos.Y),
 					*NewPinkSquare(spawnPos2.X, spawnPos2.Y),
 				)
-				game.data.spawns += 2
 			}
 		} else if r <= 0.75 {
 			for _, corner := range corners {
@@ -1431,21 +1393,19 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 					corner.X,
 					corner.Y,
 				)
-				game.data.entities = append(
-					game.data.entities, *blackhole, *snek, *pink, *dodger,
+				spawns = append(
+					spawns, *blackhole, *snek, *pink, *dodger,
 				)
-				game.data.spawns += 4
 			}
 		} else if r <= 0.85 {
 			total := 4.0
 			step := 360.0 / total
 			for i := 0.0; i < total; i++ {
 				spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-				game.data.entities = append(
-					game.data.entities,
+				spawns = append(
+					spawns,
 					*NewBlackHole(spawnPos.X, spawnPos.Y),
 				)
-				game.data.spawns += 2
 			}
 		} else {
 			total := 14.0
@@ -1453,14 +1413,18 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 			for i := 0.0; i < total; i++ {
 				spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
 				spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(650.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-				game.data.entities = append(
-					game.data.entities,
+				spawns = append(
+					spawns,
 					*NewFollower(spawnPos.X, spawnPos.Y),
 					*NewFollower(spawnPos2.X, spawnPos2.Y),
 				)
-				game.data.spawns += 2
 			}
 		}
+
+		// spawn entitites
+		PlaySpawnSounds(spawns)
+		game.data.spawns += len(spawns)
+		game.data.entities = append(game.data.entities, spawns...)
 		game.data.lastWave = last
 	}
 
@@ -1487,6 +1451,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 						pixel.V((worldWidth/2)-32, (worldHeight/2)-32),
 					}
 
+					spawns := make([]entityData, 100)
 					for _, p := range points {
 						var enemy *entityData
 						if wave.entityType == "follower" { // dictionary lookup?
@@ -1510,11 +1475,12 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 								p.Y,
 							)
 						}
-						game.data.entities = append(game.data.entities, *enemy)
-						game.data.spawns++
+						spawns = append(spawns, *enemy)
 					}
-					spawnSound := spawnBuffer.Streamer(0, spawnBuffer.Len())
-					speaker.Play(spawnSound)
+
+					PlaySpawnSounds(spawns)
+					game.data.entities = append(game.data.entities, spawns...)
+					game.data.spawns += len(spawns)
 					wave.lastSpawn = time.Now()
 					game.data.waves[waveID] = wave
 				}
@@ -1612,14 +1578,7 @@ func (game *game) pacifismGameModeUpdate(debug bool, last time.Time, totalTime f
 			spawns = append(spawns, *NewGate(pos.X, pos.Y))
 		}
 
-		playback := map[string]bool{}
-		for _, e := range spawns {
-			if playback[e.entityType] || e.spawnSound == nil {
-				continue
-			}
-			playback[e.entityType] = true
-			speaker.Play(e.SpawnSound())
-		}
+		PlaySpawnSounds(spawns)
 		game.data.entities = append(game.data.entities, spawns...)
 		game.data.spawns += len(spawns)
 		game.data.lastSpawn = time.Now()
@@ -1790,8 +1749,14 @@ func init() {
 func run() {
 	monitor := pixelgl.PrimaryMonitor()
 	width, height := monitor.Size()
+	if width > 1920 {
+		width = 1920
+	}
+	if height > 1080 {
+		height = 1080
+	}
 	cfg := pixelgl.WindowConfig{
-		Title:  "Euclidean Combat",
+		Title:  "Starship Kepler",
 		Bounds: pixel.R(0, 0, width, height),
 		// Bounds: pixel.R(0, 0, 1024, 768),
 		Monitor:   monitor,
@@ -2826,7 +2791,7 @@ func run() {
 								volume := &effects.Volume{
 									Streamer: hitSound,
 									Base:     10,
-									Volume:   -1.4,
+									Volume:   -0.9,
 									Silent:   false,
 								}
 								speaker.Play(volume)
@@ -3190,7 +3155,7 @@ func run() {
 					} else {
 						tmpTarget.Clear()
 						tmpTarget.SetMatrix(pixel.IM.Rotated(e.origin, e.orientation.Angle()))
-						weight := 2.0
+						weight := 3.0
 						if e.entityType == "follower" {
 							tmpTarget.Color = e.color
 
@@ -3383,19 +3348,37 @@ func run() {
 			scoreTxt.Dot.X -= (scoreTxt.BoundsOf(txt).W() / 2)
 			fmt.Fprintf(scoreTxt, txt, game.data.scoreMultiplier)
 
-			if debug {
-				txt = "Debugging: On"
-				fmt.Fprintln(scoreTxt, txt)
+			// if debug {
+			txt = "Debugging: On"
+			fmt.Fprintln(scoreTxt, txt)
 
-				txt = "Timescale: %.2f\n"
-				fmt.Fprintf(scoreTxt, txt, game.data.timescale)
+			txt = "Timescale: %.2f\n"
+			fmt.Fprintf(scoreTxt, txt, game.data.timescale)
 
-				txt = "Entities: %d\n"
-				fmt.Fprintf(scoreTxt, txt, len(game.data.entities))
+			txt = "Entities: %d\n"
+			fmt.Fprintf(scoreTxt, txt, len(game.data.entities))
 
-				txt = "Particles: %d\n"
-				fmt.Fprintf(scoreTxt, txt, len(game.data.particles))
-			}
+			txt = "Particles: %d\n"
+			fmt.Fprintf(scoreTxt, txt, len(game.data.particles))
+
+			txt = "Kills: %d\n"
+			fmt.Fprintf(scoreTxt, txt, game.data.kills)
+
+			txt = "Notoriety: %f\n"
+			fmt.Fprintf(scoreTxt, txt, game.data.notoriety)
+
+			txt = "spawnCount: %d\n"
+			fmt.Fprintf(scoreTxt, txt, game.data.spawnCount)
+
+			txt = "spawnFreq: %f\n"
+			fmt.Fprintf(scoreTxt, txt, game.data.ambientSpawnFreq)
+
+			txt = "waveFreq: %f\n"
+			fmt.Fprintf(scoreTxt, txt, game.data.waveFreq)
+
+			txt = "multiplierReward: %d kills required\n"
+			fmt.Fprintf(scoreTxt, txt, game.data.multiplierReward-game.data.killsSinceBorn)
+			// }
 
 			scoreTxt.Draw(
 				win,
