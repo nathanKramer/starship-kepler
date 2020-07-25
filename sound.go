@@ -39,6 +39,7 @@ var multiplierSounds map[int]*beep.Buffer
 
 var bombBuffer *beep.Buffer
 var musicStreamer *beep.StreamSeekCloser
+var pacifismMusicStreamer *beep.StreamSeekCloser
 var menuMusicStreamer *beep.StreamSeekCloser
 var introStreamer *beep.StreamSeekCloser
 
@@ -107,6 +108,7 @@ func init() {
 	bombBuffer, _ = prepareBuffer("sound/usebomb.mp3")
 
 	musicStreamer, soundFormat = prepareStreamer("sound/music.mp3")
+	pacifismMusicStreamer, soundFormat = prepareStreamer("sound/pacifismmusic.mp3")
 	menuMusicStreamer, soundFormat = prepareStreamer("sound/menumusic.mp3")
 	introStreamer, soundFormat = prepareStreamer("sound/intro.mp3")
 	speaker.Init(soundFormat.SampleRate, soundFormat.SampleRate.N(time.Second/10))
@@ -115,6 +117,14 @@ func init() {
 func playIntroMusic() {
 	speaker.Clear()
 	s := *introStreamer
+	s.Seek(0)
+	speaker.Play(s)
+	// defer s.Close()
+}
+
+func playPacifismMusic() {
+	speaker.Clear()
+	s := *pacifismMusicStreamer
 	s.Seek(0)
 	speaker.Play(s)
 	// defer s.Close()

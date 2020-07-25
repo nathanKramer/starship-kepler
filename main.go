@@ -1019,7 +1019,7 @@ type game struct {
 }
 
 // Menus
-var implementedMenuItems = []string{"Quick Play: Evolved", "Quick Play: Pacifism", "Quit"}
+var implementedMenuItems = []string{"Quick Play: Evolved", "Quick Play: Pacifism", "Options", "Quit"}
 
 func NewMainMenu() menu {
 	return menu{
@@ -1029,6 +1029,13 @@ func NewMainMenu() menu {
 }
 
 func NewPauseMenu() menu {
+	return menu{
+		selection: 0,
+		options:   []string{"Resume", "Main Menu"},
+	}
+}
+
+func NewOptionsMenu() menu {
 	return menu{
 		selection: 0,
 		options:   []string{"Resume", "Main Menu"},
@@ -1927,6 +1934,9 @@ func run() {
 					game.state = "starting"
 					game.data = *NewPacifismGame()
 				}
+				if game.menu.options[game.menu.selection] == "Options" {
+					game.menu = NewOptionsMenu()
+				}
 				if game.menu.options[game.menu.selection] == "Quit" {
 					game.state = "quitting"
 				}
@@ -2021,8 +2031,11 @@ func run() {
 			if game.data.mode == "evolved" {
 				game.data = *NewEvolvedGame()
 				playMusic()
-			} else {
+			} else if game.data.mode == "pacifism" {
 				game.data = *NewPacifismGame()
+				playPacifismMusic()
+			} else {
+				game.data = *NewStoryGame()
 				playMenuMusic()
 			}
 
