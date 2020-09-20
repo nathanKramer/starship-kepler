@@ -10,7 +10,7 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/nathanKramer/pixel-test/sliceextra"
+	"github.com/nathanKramer/starship-kepler/sliceextra"
 
 	"github.com/faiface/beep"
 	"github.com/faiface/beep/effects"
