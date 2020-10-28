@@ -14,6 +14,7 @@ var shotSoundFormat *beep.Format
 var shotBuffer *beep.Buffer
 var shotBuffer2 *beep.Buffer
 var shotBuffer3 *beep.Buffer
+var shotBuffer4 *beep.Buffer
 var spawnBuffer *beep.Buffer
 var spawnBuffer2 *beep.Buffer
 var spawnBuffer3 *beep.Buffer
@@ -71,6 +72,7 @@ func init() {
 	shotBuffer, shotSoundFormat = prepareBuffer("sound/shoot.mp3")
 	shotBuffer2, shotSoundFormat = prepareBuffer("sound/shoot2.mp3")
 	shotBuffer3, shotSoundFormat = prepareBuffer("sound/shoot3.mp3")
+	shotBuffer4, shotSoundFormat = prepareBuffer("sound/shoot-mixed.mp3")
 
 	spawnBuffer, _ = prepareBuffer("sound/spawn.mp3")
 	spawnBuffer2, _ = prepareBuffer("sound/spawn2.mp3")
