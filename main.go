@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"image"
 	"image/color"
@@ -10,6 +11,8 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"runtime"
+	"runtime/pprof"
 	"time"
 
 	"github.com/nathanKramer/starship-kepler/sliceextra"
@@ -28,7 +31,7 @@ import (
 )
 
 const maxParticles = 1600
-const worldWidth = 1500.0
+const worldWidth = 1700.0
 const worldHeight = 1080.0
 const gameTitle = "Starship Kepler"
 
@@ -42,6 +45,8 @@ const actionSwitchMode = pixelgl.KeyLeftControl
 const actionBoost = pixelgl.KeyLeftShift
 const actionBomb = pixelgl.KeySpace
 const actionStop = pixelgl.KeyLeftAlt
+
+const particlesOn = true
 
 var elementWaterColor = color.RGBA{0x48, 0x64, 0xed, 0xff}
 var elementLifeColor = colornames.Green
@@ -143,6 +148,88 @@ func (a Vector3) ToVec2(screenSize pixel.Rect) pixel.Vec {
 	factor := (a.Z + 2000) / 2000
 	return pixel.V(a.X, a.Y).Sub(screenSize.Max.Scaled(0.5)).Scaled(factor).Add(screenSize.Max.Scaled(0.5))
 	// return pixel.V(a.X, a.Y)
+}
+
+func InlineAppendBullets(
+	bullets []bullet,
+	bulletsToAdd ...bullet) []bullet {
+	for _, newBullet := range bulletsToAdd {
+		if newBullet.velocity == (pixel.Vec{}) {
+			continue
+		}
+
+		bulletID := 0
+		if len(bullets) < cap(bullets) {
+			bullets = append(bullets, newBullet)
+		} else {
+			for bulletID < len(bullets) {
+				existing := bullets[bulletID]
+				if existing.velocity == (pixel.Vec{}) {
+					bullets[bulletID] = newBullet
+					break
+				}
+				bulletID++
+			}
+		}
+	}
+
+	return bullets
+}
+
+func InlineAppendEntities(
+	entities []entityData,
+	entitiesToAdd ...entityData) []entityData {
+	for _, newEntity := range entitiesToAdd {
+		if newEntity.entityType == "" {
+			continue
+		}
+
+		bulletID := 0
+		if len(entities) < cap(entities) {
+			entities = append(entities, newEntity)
+		} else {
+			for bulletID < len(entities) {
+				existing := entities[bulletID]
+				if existing.entityType == "" {
+					entities[bulletID] = newEntity
+					break
+				}
+				bulletID++
+			}
+		}
+	}
+
+	return entities
+}
+
+func InlineAppendParticles(
+	particles []particle,
+	particlesToAdd ...particle) []particle {
+
+	// config var
+	if !particlesOn {
+		return particles
+	}
+	for _, newParticle := range particlesToAdd {
+		if newParticle == (particle{}) {
+			continue
+		}
+		particleID := 0
+		if len(particles) < cap(particles) {
+			particles = append(particles, newParticle)
+		} else {
+			for particleID < len(particles) {
+				existing := particles[particleID]
+				if existing == (particle{}) {
+					particles[particleID] = newParticle
+					break
+				}
+				particleID++
+			}
+		}
+	}
+
+	return particles
 }
 
 func randomVector(magnitude float64) pixel.Vec {
@@ -474,7 +561,13 @@ func PlaySpawnSounds(spawns []entityData) {
 	}
 }
 
-func (e *entityData) IntersectWithPlayer(inflictor entityData, eID int, game *game, player *entityData, currTime time.Time, entsToAdd []entityData, gameOverTxt *text.Text) {
+func (e *entityData) IntersectWithPlayer(
+	inflictor entityData,
+	eID int,
+	game *game,
+	player *entityData,
+	currTime time.Time,
+	gameOverTxt *text.Text) {
 	if e.entityType == "gate" {
 		game.grid.ApplyExplosiveForce(100, Vector3{e.origin.X, e.origin.Y, 0.0}, 100)
 
@@ -494,7 +587,7 @@ func (e *entityData) IntersectWithPlayer(inflictor entityData, eID int, game *ga
 			dirV := e.origin.Sub(ent.origin)
 			dist := dirV.Len()
 			if dist < 224 {
-				ent.DealDamage(&ent, entID, 4, currTime, game, entsToAdd, player)
+				ent.DealDamage(&ent, entID, 4, currTime, game, player)
 				game.data.entities[entID] = ent
 			}
 			game.data.entities[entID] = ent
@@ -506,7 +599,7 @@ func (e *entityData) IntersectWithPlayer(inflictor entityData, eID int, game *ga
 			for _, playerEl := range player.elements {
 				if el == playerEl {
 					warded = true
-					e.DealDamage(player, eID, 1, currTime, game, entsToAdd, player)
+					e.DealDamage(player, eID, 1, currTime, game, player)
 					break
 				}
 			}
@@ -534,7 +627,7 @@ func (e *entityData) IntersectWithPlayer(inflictor entityData, eID int, game *ga
 					2.5,
 					"player",
 				)
-				game.data.particles = append(game.data.particles, p)
+				game.data.newParticles = InlineAppendParticles(game.data.newParticles, p)
 			}
 			if game.data.mode == "menu_game" {
 				game.data.player = *NewPlayer(0.0, 0.0)
@@ -582,15 +675,14 @@ func (b *bullet) DealDamage(
 	amount int,
 	currTime time.Time,
 	game *game,
-	entsToAdd []entityData,
 	player *entityData,
-) []entityData {
+) {
 	for _, el := range b.data.elements {
 		for i, inflictorEl := range inflictor.elements {
 			if el == inflictorEl {
 				b.data.elements = append(b.data.elements[:i], b.data.elements[i+1:]...)
 				game.data.bullets[bID] = *b
-				return entsToAdd
+				return
 			}
 		}
 	}
@@ -600,8 +692,6 @@ func (b *bullet) DealDamage(
 		b.data.alive = false
 		game.data.bullets[bID] = *b
 	}
-
-	return entsToAdd
 }
 
 func (e *entityData) DealDamage(
@@ -610,9 +700,8 @@ func (e *entityData) DealDamage(
 	amount int,
 	currTime time.Time,
 	game *game,
-	entsToAdd []entityData,
 	player *entityData,
-) []entityData {
+) {
 
 	for _, el := range e.elements {
 		for i, inflictorEl := range inflictor.elements {
@@ -652,10 +741,10 @@ func (e *entityData) DealDamage(
 				"enemy",
 			)
 
-			if len(game.data.particles) < maxParticles {
-				game.data.particles = append(game.data.particles, p)
+			if len(game.data.newParticles) < maxParticles {
+				game.data.newParticles = InlineAppendParticles(game.data.newParticles, p)
 			} else {
-				game.data.particles[len(game.data.particles)%maxParticles] = p
+				game.data.newParticles[len(game.data.newParticles)%maxParticles] = p
 			}
 		}
 
@@ -675,7 +764,7 @@ func (e *entityData) DealDamage(
 				}
 
 				pleb := *NewPinkPleb(pos.X, pos.Y)
-				entsToAdd = append(entsToAdd, pleb)
+				game.data.newEntities = InlineAppendEntities(game.data.newEntities, pleb)
 			}
 		} else if e.entityType == "blackhole" {
 			game.grid.ApplyExplosiveForce(200, Vector3{e.origin.X, e.origin.Y, 0.0}, 200)
@@ -695,7 +784,7 @@ func (e *entityData) DealDamage(
 				dirV := e.origin.Sub(ent.origin)
 				dist := dirV.Len()
 				if dist < 150 {
-					ent.DealDamage(&ent, entID, 4, currTime, game, entsToAdd, player)
+					ent.DealDamage(&ent, entID, 4, currTime, game, player)
 					game.data.entities[entID] = ent
 				}
 				if dist < 350 {
@@ -736,12 +825,10 @@ func (e *entityData) DealDamage(
 					"enemy",
 				)
 
-				game.data.particles = append(game.data.particles, p)
+				game.data.newParticles = InlineAppendParticles(game.data.newParticles, p)
 			}
 		}
 	}
-
-	return entsToAdd
 }
 
 func (e *entityData) Propel(dir pixel.Vec, dt float64) {
@@ -1124,17 +1211,22 @@ type gamedata struct {
 	lives           int
 	bombs           int
 	scoreMultiplier int
-	entities        []entityData
-	bullets         []bullet
-	particles       []particle
-	spawns          int
-	spawnCount      int
-	pendingSpawns   int
-	scoreSinceBorn  int
-	killsSinceBorn  int
-	player          entityData
-	weapon          weapondata
-	waves           []wavedata
+
+	entities     []entityData
+	bullets      []bullet
+	particles    []particle
+	newEntities  []entityData
+	newParticles []particle
+	newBullets   []bullet
+
+	spawns         int
+	spawnCount     int
+	pendingSpawns  int
+	scoreSinceBorn int
+	killsSinceBorn int
+	player         entityData
+	weapon         weapondata
+	waves          []wavedata
 
 	score             int
 	kills             int
@@ -1255,9 +1347,14 @@ func NewGameData() *gamedata {
 	gameData.lives = 500
 	gameData.bombs = 3
 	gameData.scoreMultiplier = 1
-	gameData.entities = make([]entityData, 0, 100)
-	gameData.bullets = make([]bullet, 0, 100)
+
+	gameData.entities = make([]entityData, 0, 200)
+	gameData.bullets = make([]bullet, 0, 500)
 	gameData.particles = make([]particle, 0, maxParticles)
+	gameData.newEntities = make([]entityData, 0, 200)
+	gameData.newBullets = make([]bullet, 0, 500)
+	gameData.newParticles = make([]particle, 0, 1000)
+
 	gameData.player = *NewPlayer(0.0, 0.0)
 	gameData.spawns = 0
 	gameData.spawnCount = 1
@@ -1358,7 +1455,7 @@ func NewGame() *game {
 	return game
 }
 
-func FireBullet(aim pixel.Vec, game *game, origin pixel.Vec, player *entityData, bulletsToCreate []bullet) []bullet {
+func FireBullet(aim pixel.Vec, game *game, origin pixel.Vec, player *entityData) {
 	width := float64(game.data.weapon.bulletCount) * 5.0
 	rad := math.Atan2(aim.Unit().Y, aim.Unit().X)
 	for i := 0; i < game.data.weapon.bulletCount; i++ {
@@ -1379,15 +1476,20 @@ func FireBullet(aim pixel.Vec, game *game, origin pixel.Vec, player *entityData,
 			append([]string{}, player.elements...),
 			game.data.weapon.duration,
 		)
-		bulletsToCreate = append(bulletsToCreate, *b)
+		game.data.newBullets = InlineAppendBullets(game.data.newBullets, *b)
 	}
-
-	return bulletsToCreate
 }
 
 func (data *gamedata) respawnPlayer() {
-	data.entities = make([]entityData, 0, 100)
-	data.bullets = make([]bullet, 0, 100)
+	for entID, _ := range data.newEntities {
+		data.newEntities[entID] = entityData{}
+	}
+	for entID, _ := range data.entities {
+		data.entities[entID] = entityData{}
+	}
+	for bullID, _ := range data.bullets {
+		data.bullets[bullID] = bullet{}
+	}
 	data.player = *NewPlayer(0.0, 0.0)
 	data.weapon = *NewWeaponData()
 	data.scoreMultiplier = 1
@@ -1467,9 +1569,10 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 
 	// wave management
 	waveDead := livingEntities == 0 && game.data.pendingSpawns == 0
-	firstWave := game.data.lastWave == (time.Time{}) && totalTime >= game.data.waveFreq
+	firstWave := game.data.lastWave == (time.Time{}) && totalTime >= 2
 	subsequentWave := (game.data.lastWave != (time.Time{}) &&
 		(last.Sub(game.data.lastWave).Seconds() >= game.data.waveFreq) || waveDead)
+
 	if !debug && (firstWave || subsequentWave) {
 		corners := [4]pixel.Vec{
 			pixel.V(-(worldWidth/2)+80, -(worldHeight/2)+80),
@@ -1481,172 +1584,176 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 		fmt.Printf("[LandingPartySpawn] %s\n", time.Now().String())
 		r := rand.Float64() * (0.4 + math.Min(game.data.notoriety, 0.6))
 		spawns := make([]entityData, 0, game.data.spawnCount)
-		if r <= 0.1 {
-			count := 2 + rand.Intn(4)
-			for i := 0; i < count; i++ {
-				p := corners[i%4]
-				enemy := NewDodger(
-					p.X,
-					p.Y,
-				)
-				spawns = append(spawns, *enemy)
-			}
-		} else if r <= 0.2 {
-			count := 2 + rand.Intn(4)
-			for i := 0; i < count; i++ {
-				p := corners[i%4]
-				enemy := NewPinkSquare(
-					p.X,
-					p.Y,
-				)
-				spawns = append(spawns, *enemy)
-			}
-		} else if r <= 0.25 {
-			count := 8 + rand.Intn(4)
-			for i := 0; i < count; i++ {
-				p := corners[i%4]
-				enemy := NewSnek(
-					p.X,
-					p.Y,
-				)
-				spawns = append(spawns, *enemy)
-			}
-		} else if r <= 0.5 {
-			r := rand.Intn(4)
-			var t string
-			var freq float64
-			var duration float64
-			switch r {
-			case 0:
-				t = "follower"
-				freq = 0.5
-				duration = 10.0
-			case 1:
-				t = "dodger"
-				freq = 0.25
-				duration = 3.0
-			case 2:
-				t = "pink"
-				freq = 0.2
-				duration = 1.0
-			case 3:
-				t = "replicator"
-				freq = 0.2
-				duration = 5.0
-			}
 
-			game.data.waves = append(game.data.waves, *NewWaveData(t, freq, duration))
-			game.data.lastWave = last
-		} else if r <= 0.55 {
-			total := 8.0
-			step := 360.0 / total
-			for i := 0.0; i < total; i++ {
-				spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-				spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(450.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-				spawns = append(
-					spawns,
-					*NewFollower(spawnPos.X, spawnPos.Y),
-					*NewFollower(spawnPos2.X, spawnPos2.Y),
-				)
-			}
-		} else if r <= 0.575 {
-			total := 8.0
-			step := 360.0 / total
-			for i := 0.0; i < total; i++ {
-				spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-				spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(450.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-				spawns = append(
-					spawns,
-					*NewDodger(spawnPos.X, spawnPos.Y),
-					*NewDodger(spawnPos2.X, spawnPos2.Y),
-				)
-			}
-		} else if r <= 0.6 {
-			total := 5.0
-			step := 360.0 / total
-			for i := 0.0; i < total; i++ {
-				for j := 0; j < 16; j++ {
-					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0).Add(randomVector(16.0)).Add(player.origin)
+		// landing party spawn
+		{
+			if r <= 0.1 {
+				count := 2 + rand.Intn(4)
+				for i := 0; i < count; i++ {
+					p := corners[i%4]
+					enemy := NewDodger(
+						p.X,
+						p.Y,
+					)
+					spawns = append(spawns, *enemy)
+				}
+			} else if r <= 0.2 {
+				count := 2 + rand.Intn(4)
+				for i := 0; i < count; i++ {
+					p := corners[i%4]
+					enemy := NewPinkSquare(
+						p.X,
+						p.Y,
+					)
+					spawns = append(spawns, *enemy)
+				}
+			} else if r <= 0.25 {
+				count := 8 + rand.Intn(4)
+				for i := 0; i < count; i++ {
+					p := corners[i%4]
+					enemy := NewSnek(
+						p.X,
+						p.Y,
+					)
+					spawns = append(spawns, *enemy)
+				}
+			} else if r <= 0.5 {
+				r := rand.Intn(4)
+				var t string
+				var freq float64
+				var duration float64
+				switch r {
+				case 0:
+					t = "follower"
+					freq = 0.5
+					duration = 10.0
+				case 1:
+					t = "dodger"
+					freq = 0.25
+					duration = 3.0
+				case 2:
+					t = "pink"
+					freq = 0.2
+					duration = 1.0
+				case 3:
+					t = "replicator"
+					freq = 0.2
+					duration = 5.0
+				}
+
+				game.data.waves = append(game.data.waves, *NewWaveData(t, freq, duration))
+				game.data.lastWave = last
+			} else if r <= 0.55 {
+				total := 8.0
+				step := 360.0 / total
+				for i := 0.0; i < total; i++ {
+					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+					spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(450.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
 					spawns = append(
 						spawns,
-						*NewReplicator(spawnPos.X, spawnPos.Y),
+						*NewFollower(spawnPos.X, spawnPos.Y),
+						*NewFollower(spawnPos2.X, spawnPos2.Y),
 					)
 				}
-			}
-		} else if r <= 0.64 {
-			total := 10.0
-			step := 360.0 / total
-			for i := 0.0; i < total; i++ {
-				spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-				spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(550.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-				spawns = append(
-					spawns,
-					*NewSnek(spawnPos.X, spawnPos.Y),
-					*NewSnek(spawnPos2.X, spawnPos2.Y),
-				)
-			}
-		} else if r <= 0.67 {
-			total := 4.0
-			step := 360.0 / total
-			for i := 0.0; i < total; i++ {
-				spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(450.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-				spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-				spawns = append(
-					spawns,
-					*NewPinkSquare(spawnPos.X, spawnPos.Y),
-					*NewPinkSquare(spawnPos2.X, spawnPos2.Y),
-				)
-			}
-		} else if r <= 0.75 {
-			for _, corner := range corners {
-				blackhole := NewBlackHole(
-					corner.X,
-					corner.Y,
-				)
-				snek := NewSnek(
-					corner.X,
-					corner.Y,
-				)
-				pink := NewPinkSquare(
-					corner.X,
-					corner.Y,
-				)
-				dodger := NewDodger(
-					corner.X,
-					corner.Y,
-				)
-				spawns = append(
-					spawns, *blackhole, *snek, *pink, *dodger,
-				)
-			}
-		} else if r <= 0.85 {
-			total := 4.0
-			step := 360.0 / total
-			for i := 0.0; i < total; i++ {
-				spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-				spawns = append(
-					spawns,
-					*NewBlackHole(spawnPos.X, spawnPos.Y),
-				)
-			}
-		} else {
-			total := 14.0
-			step := 360.0 / total
-			for i := 0.0; i < total; i++ {
-				spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-				spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(650.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-				spawns = append(
-					spawns,
-					*NewFollower(spawnPos.X, spawnPos.Y),
-					*NewFollower(spawnPos2.X, spawnPos2.Y),
-				)
+			} else if r <= 0.575 {
+				total := 8.0
+				step := 360.0 / total
+				for i := 0.0; i < total; i++ {
+					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+					spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(450.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+					spawns = append(
+						spawns,
+						*NewDodger(spawnPos.X, spawnPos.Y),
+						*NewDodger(spawnPos2.X, spawnPos2.Y),
+					)
+				}
+			} else if r <= 0.6 {
+				total := 5.0
+				step := 360.0 / total
+				for i := 0.0; i < total; i++ {
+					for j := 0; j < 16; j++ {
+						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0).Add(randomVector(16.0)).Add(player.origin)
+						spawns = append(
+							spawns,
+							*NewReplicator(spawnPos.X, spawnPos.Y),
+						)
+					}
+				}
+			} else if r <= 0.64 {
+				total := 10.0
+				step := 360.0 / total
+				for i := 0.0; i < total; i++ {
+					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+					spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(550.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+					spawns = append(
+						spawns,
+						*NewSnek(spawnPos.X, spawnPos.Y),
+						*NewSnek(spawnPos2.X, spawnPos2.Y),
+					)
+				}
+			} else if r <= 0.67 {
+				total := 4.0
+				step := 360.0 / total
+				for i := 0.0; i < total; i++ {
+					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(450.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+					spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+					spawns = append(
+						spawns,
+						*NewPinkSquare(spawnPos.X, spawnPos.Y),
+						*NewPinkSquare(spawnPos2.X, spawnPos2.Y),
+					)
+				}
+			} else if r <= 0.75 {
+				for _, corner := range corners {
+					blackhole := NewBlackHole(
+						corner.X,
+						corner.Y,
+					)
+					snek := NewSnek(
+						corner.X,
+						corner.Y,
+					)
+					pink := NewPinkSquare(
+						corner.X,
+						corner.Y,
+					)
+					dodger := NewDodger(
+						corner.X,
+						corner.Y,
+					)
+					spawns = append(
+						spawns, *blackhole, *snek, *pink, *dodger,
+					)
+				}
+			} else if r <= 0.85 {
+				total := 4.0
+				step := 360.0 / total
+				for i := 0.0; i < total; i++ {
+					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+					spawns = append(
+						spawns,
+						*NewBlackHole(spawnPos.X, spawnPos.Y),
+					)
+				}
+			} else {
+				total := 14.0
+				step := 360.0 / total
+				for i := 0.0; i < total; i++ {
+					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+					spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(650.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+					spawns = append(
+						spawns,
+						*NewFollower(spawnPos.X, spawnPos.Y),
+						*NewFollower(spawnPos2.X, spawnPos2.Y),
+					)
+				}
 			}
 		}
 
 		// spawn entitites
 		PlaySpawnSounds(spawns)
 		game.data.spawns += len(spawns)
-		game.data.entities = append(game.data.entities, spawns...)
+		game.data.newEntities = InlineAppendEntities(game.data.newEntities, spawns...)
 		game.data.lastWave = last
 	}
 
@@ -1802,7 +1909,7 @@ func (game *game) pacifismGameModeUpdate(debug bool, last time.Time, totalTime f
 		}
 
 		PlaySpawnSounds(spawns)
-		game.data.entities = append(game.data.entities, spawns...)
+		game.data.newEntities = InlineAppendEntities(game.data.newEntities, spawns...)
 		game.data.spawns += len(spawns)
 		game.data.lastSpawn = time.Now()
 
@@ -1991,6 +2098,19 @@ func loadPicture(path string) (pixel.Picture, error) {
 	return pixel.PictureDataFromImage(img), nil
 }
 
+func PrintMemUsage() {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	// For info on each, see: https://golang.org/pkg/runtime/#MemStats
+	fmt.Printf("Alloc = %v MB", bToMb(m.Alloc))
+	fmt.Printf("\tSys = %v MB", bToMb(m.Sys))
+	fmt.Printf("\tNumGC = %v\n", m.NumGC)
+}
+
+func bToMb(b uint64) uint64 {
+	return b / 1024 / 1024
+}
+
 func init() {
 	rand.Seed(time.Now().Unix())
 }
@@ -1999,6 +2119,7 @@ func init() {
 func run() {
 	monitor := pixelgl.PrimaryMonitor()
 	width, height := monitor.Size()
+	// width, height := 1024.0, 768.0
 	if width > 1920 {
 		width = 1920
 	}
@@ -2010,7 +2131,7 @@ func run() {
 		Bounds: pixel.R(0, 0, width, height),
 		// Bounds: pixel.R(0, 0, 1024, 768),
 		Monitor:   monitor,
-		Maximized: true,
+		Maximized: false,
 		VSync:     true,
 	}
 	debug := false
@@ -2069,12 +2190,8 @@ func run() {
 	// }
 	bloom3.SetFragmentShader(blur)
 
-	imd := imdraw.New(nil)
-	playerDraw := imdraw.New(nil)
-	bulletDraw := imdraw.New(nil)
-	particleDraw := imdraw.New(nil)
-	tmpTarget := imdraw.New(nil)
-	camPos := pixel.ZV
+	innerWardBatch := imdraw.New(wardInnerPic)
+	outerWardBatch := imdraw.New(wardOuterPic)
 
 	// Game initialization
 	last := time.Now()
@@ -2130,11 +2247,17 @@ func run() {
 	}
 
 	game := NewGame()
+	camPos := pixel.ZV
+	imd := imdraw.New(nil)
+	bulletDraw := imdraw.New(nil)
+	particleDraw := imdraw.New(nil)
+	tmpTarget := imdraw.New(nil)
 
 	lastMenuChoice := time.Now()
+	lastMemCheck := time.Now()
 
 	// precache player draw
-	drawShip(playerDraw)
+	// drawShip(playerDraw)
 	// playIntroMusic()
 	debugInfos := []debugInfo{}
 	totalTime := 0.0
@@ -2143,8 +2266,12 @@ func run() {
 	game.menu = NewMainMenu()
 	game.data = *NewMenuGame()
 
+	PrintMemUsage()
+
 	for !win.Closed() {
 		if game.state == "quitting" {
+			runtime.GC()
+			PrintMemUsage()
 			win.SetClosed(true)
 		}
 
@@ -2152,6 +2279,27 @@ func run() {
 		dt := math.Min(time.Since(last).Seconds(), 0.1) * game.data.timescale
 		totalTime += dt
 		last = time.Now()
+
+		imd.Reset()
+		bulletDraw.Reset()
+		particleDraw.Reset()
+		tmpTarget.Reset()
+
+		if last.Sub(lastMemCheck).Seconds() > 5.0 {
+			PrintMemUsage()
+			fmt.Printf("Entities\tlen: %d\tcap: %d\n", len(game.data.entities), cap(game.data.entities))
+			fmt.Printf("New Entities\tlen: %d\tcap: %d\n\n", len(game.data.newEntities), cap(game.data.newEntities))
+
+			fmt.Printf("Bullets\tlen: %d\tcap: %d\n", len(game.data.bullets), cap(game.data.bullets))
+			fmt.Printf("New Bullets\tlen: %d\tcap: %d\n\n", len(game.data.newBullets), cap(game.data.newBullets))
+
+			fmt.Printf("Particles\tlen: %d\tcap: %d\n", len(game.data.particles), cap(game.data.particles))
+			fmt.Printf("New Particles\tlen: %d\tcap: %d\n\n", len(game.data.newParticles), cap(game.data.newParticles))
+
+			lastMemCheck = last
+
+			runtime.GC()
+		}
 
 		if debug {
 			debugInfos = []debugInfo{}
@@ -2307,6 +2455,12 @@ func run() {
 			}
 		}
 
+		scaledX := (win.MousePosition().X - (win.Bounds().W() / 2)) *
+			(canvas.Bounds().W() / win.Bounds().W())
+		scaledY := (win.MousePosition().Y - (win.Bounds().H() / 2)) *
+			(canvas.Bounds().H() / win.Bounds().H())
+		mp := pixel.V(scaledX, scaledY).Add(camPos)
+
 		direction := pixel.ZV
 		if game.state == "playing" {
 			if !player.alive {
@@ -2320,212 +2474,113 @@ func run() {
 			}
 
 			// player controls
-			if win.JustPressed(pixelgl.KeyGraveAccent) {
-				debug = !debug
-			}
-			if win.JustPressed(pixelgl.KeyMinus) {
-				game.data.timescale *= 0.5
-				if game.data.timescale < 0.1 {
-					game.data.timescale = 0.0
+			{
+				if win.JustPressed(pixelgl.KeyGraveAccent) {
+					debug = !debug
 				}
-			}
-			if win.JustPressed(pixelgl.KeyEqual) {
-				game.data.timescale *= 2.0
-				if game.data.timescale > 4.0 || game.data.timescale == 0.0 {
-					game.data.timescale = 1.0
-				}
-			}
-			if win.JustPressed(pixelgl.Key1) {
-				game.data.weapon = *NewWeaponData()
-			}
-			if win.JustPressed(pixelgl.Key2) {
-				game.data.weapon = *NewBurstWeapon()
-			}
-			if win.JustPressed(pixelgl.Key3) {
-				game.data.weapon = *NewConicWeapon()
-			}
-
-			scaledX := (win.MousePosition().X - (win.Bounds().W() / 2)) * (canvas.Bounds().W() / win.Bounds().W())
-			scaledY := (win.MousePosition().Y - (win.Bounds().H() / 2)) * (canvas.Bounds().H() / win.Bounds().H())
-			mp := pixel.V(scaledX, scaledY).Add(camPos)
-
-			// player.velocity = pixel.ZV
-			// if win.Pressed(actionAct) {
-			// mouse based target movement
-			// 	player.target = mp
-			// }
-
-			// if win.Pressed(actionSwitchMode) {
-			// 	// GW
-			// 	player.mode = "GW"
-			// 	player.elements = make([]string, 0)
-			// } else {
-			// 	player.mode = "MWW"
-			// }
-
-			if win.Pressed(pixelgl.KeyLeft) || win.Pressed(pixelgl.KeyA) {
-				direction = direction.Add(pixel.V(-1, 0))
-				player.target = pixel.Vec{}
-			}
-			if win.Pressed(pixelgl.KeyUp) || win.Pressed(pixelgl.KeyW) {
-				direction = direction.Add(pixel.V(0, 1))
-				player.target = pixel.Vec{}
-			}
-			if win.Pressed(pixelgl.KeyRight) || win.Pressed(pixelgl.KeyD) {
-				direction = direction.Add(pixel.V(1, 0))
-				player.target = pixel.Vec{}
-			}
-			if win.Pressed(pixelgl.KeyDown) || win.Pressed(pixelgl.KeyS) {
-				direction = direction.Add(pixel.V(0, -1))
-				player.target = pixel.Vec{}
-			}
-
-			if win.JustPressed(pixelgl.KeyQ) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonX) {
-				player.QueueElement("water")
-			}
-			if win.JustPressed(pixelgl.KeyE) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonRightBumper) {
-				player.QueueElement("chaos")
-			}
-			if win.JustPressed(pixelgl.KeyR) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonLeftBumper) {
-				player.QueueElement("spirit")
-			}
-			if win.JustPressed(pixelgl.KeyF) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonB) {
-				player.QueueElement("fire")
-			}
-			if win.JustPressed(pixelgl.KeyZ) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonA) {
-				player.QueueElement("lightning")
-			}
-			if win.JustPressed(pixelgl.KeyX) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonY) {
-				player.QueueElement("wind")
-			}
-			if win.JustPressed(pixelgl.KeyC) {
-				player.QueueElement("life")
-			}
-
-			if win.Pressed(actionStop) || player.origin.To(player.target).Len() < 50.0 {
-				player.target = pixel.Vec{}
-			}
-
-			if (player.target != pixel.Vec{}) {
-				direction = direction.Add(player.origin.To(player.target).Unit())
-				midColor := HSVToColor(3.0, 0.7, 1.0)
-				game.data.particles = append(
-					game.data.particles,
-					NewParticle(player.target.X, player.target.Y, midColor, 32.0, pixel.V(0.5, 1.0), 0.0, randomVector(1), 1.0, "ship"),
-				)
-			}
-
-			if win.JoystickPresent(currJoystick) {
-				moveVec := thumbstickVector(
-					win,
-					currJoystick,
-					pixelgl.AxisLeftX,
-					pixelgl.AxisLeftY,
-				)
-				direction = direction.Add(moveVec)
-			}
-
-			// spawn entities
-			// This is a long procedure to allow spawning enemies for test purposes
-			if debug {
-				if win.JustPressed(pixelgl.KeyG) {
-					enemy := *NewReplicator(
-						mp.X,
-						mp.Y,
-					)
-					game.data.entities = append(game.data.entities, enemy)
-				}
-				if win.JustPressed(pixelgl.KeyH) {
-					enemy := *NewSnek(
-						mp.X,
-						mp.Y,
-					)
-					game.data.entities = append(game.data.entities, enemy)
-				}
-				if win.JustPressed(pixelgl.KeyJ) {
-					enemy := *NewWanderer(
-						mp.X,
-						mp.Y,
-					)
-					game.data.entities = append(game.data.entities, enemy)
-				}
-				if win.JustPressed(pixelgl.KeyK) {
-					enemy := *NewFollower(
-						mp.X,
-						mp.Y,
-					)
-					game.data.entities = append(game.data.entities, enemy)
-				}
-				if win.JustPressed(pixelgl.KeyL) {
-					enemy := *NewDodger(
-						mp.X,
-						mp.Y,
-					)
-					game.data.entities = append(game.data.entities, enemy)
-				}
-				if win.JustPressed(pixelgl.KeySemicolon) {
-					enemy := *NewPinkSquare(
-						mp.X,
-						mp.Y,
-					)
-					game.data.entities = append(game.data.entities, enemy)
-				}
-				if win.JustPressed(pixelgl.KeyRightBracket) {
-					enemy := *NewSnek(
-						mp.X,
-						mp.Y,
-					)
-					game.data.entities = append(game.data.entities, enemy)
-				}
-				if win.JustPressed(pixelgl.KeyApostrophe) {
-					enemy := *NewBlackHole(
-						mp.X,
-						mp.Y,
-					)
-					game.data.entities = append(game.data.entities, enemy)
-				}
-
-				total := 16.0
-				step := 360.0 / total
-				if win.JustPressed(pixelgl.KeyN) {
-					for i := 0.0; i < total; i++ {
-						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-						enemy := *NewWanderer(spawnPos.X, spawnPos.Y)
-						game.data.entities = append(game.data.entities, enemy)
+				if win.JustPressed(pixelgl.KeyMinus) {
+					game.data.timescale *= 0.5
+					if game.data.timescale < 0.1 {
+						game.data.timescale = 0.0
 					}
 				}
-				if win.JustPressed(pixelgl.KeyM) {
-					for i := 0.0; i < total; i++ {
-						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-						enemy := *NewFollower(spawnPos.X, spawnPos.Y)
-						game.data.entities = append(game.data.entities, enemy)
+				if win.JustPressed(pixelgl.KeyEqual) {
+					game.data.timescale *= 2.0
+					if game.data.timescale > 4.0 || game.data.timescale == 0.0 {
+						game.data.timescale = 1.0
 					}
 				}
-				if win.JustPressed(pixelgl.KeyComma) {
-					for i := 0.0; i < total; i++ {
-						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-						enemy := *NewDodger(spawnPos.X, spawnPos.Y)
-						game.data.entities = append(game.data.entities, enemy)
-					}
+				if win.JustPressed(pixelgl.Key1) {
+					game.data.weapon = *NewWeaponData()
 				}
-				if win.JustPressed(pixelgl.KeyPeriod) {
-					for i := 0.0; i < total; i++ {
-						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-						enemy := *NewPinkSquare(spawnPos.X, spawnPos.Y)
-						game.data.entities = append(game.data.entities, enemy)
-					}
+				if win.JustPressed(pixelgl.Key2) {
+					game.data.weapon = *NewBurstWeapon()
 				}
-				if win.JustPressed(pixelgl.KeySlash) {
-					for i := 0.0; i < total; i++ {
-						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-						enemy := *NewBlackHole(spawnPos.X, spawnPos.Y)
-						game.data.entities = append(game.data.entities, enemy)
-					}
+				if win.JustPressed(pixelgl.Key3) {
+					game.data.weapon = *NewConicWeapon()
 				}
 
+				// player.velocity = pixel.ZV
+				// if win.Pressed(actionAct) {
+				// mouse based target movement
+				// 	player.target = mp
+				// }
+
+				// if win.Pressed(actionSwitchMode) {
+				// 	// GW
+				// 	player.mode = "GW"
+				// 	player.elements = make([]string, 0)
+				// } else {
+				// 	player.mode = "MWW"
+				// }
+
+				if win.Pressed(pixelgl.KeyLeft) || win.Pressed(pixelgl.KeyA) {
+					direction = direction.Add(pixel.V(-1, 0))
+					player.target = pixel.Vec{}
+				}
+				if win.Pressed(pixelgl.KeyUp) || win.Pressed(pixelgl.KeyW) {
+					direction = direction.Add(pixel.V(0, 1))
+					player.target = pixel.Vec{}
+				}
+				if win.Pressed(pixelgl.KeyRight) || win.Pressed(pixelgl.KeyD) {
+					direction = direction.Add(pixel.V(1, 0))
+					player.target = pixel.Vec{}
+				}
+				if win.Pressed(pixelgl.KeyDown) || win.Pressed(pixelgl.KeyS) {
+					direction = direction.Add(pixel.V(0, -1))
+					player.target = pixel.Vec{}
+				}
+
+				if win.JustPressed(pixelgl.KeyQ) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonX) {
+					player.QueueElement("water")
+				}
+				if win.JustPressed(pixelgl.KeyE) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonRightBumper) {
+					player.QueueElement("chaos")
+				}
+				if win.JustPressed(pixelgl.KeyR) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonLeftBumper) {
+					player.QueueElement("spirit")
+				}
+				if win.JustPressed(pixelgl.KeyF) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonB) {
+					player.QueueElement("fire")
+				}
+				if win.JustPressed(pixelgl.KeyZ) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonA) {
+					player.QueueElement("lightning")
+				}
+				if win.JustPressed(pixelgl.KeyX) || win.JoystickJustPressed(currJoystick, pixelgl.ButtonY) {
+					player.QueueElement("wind")
+				}
+				if win.JustPressed(pixelgl.KeyC) {
+					player.QueueElement("life")
+				}
+
+				if win.Pressed(actionStop) || player.origin.To(player.target).Len() < 50.0 {
+					player.target = pixel.Vec{}
+				}
+
+				if (player.target != pixel.Vec{}) {
+					direction = direction.Add(player.origin.To(player.target).Unit())
+					midColor := HSVToColor(3.0, 0.7, 1.0)
+					game.data.newParticles = InlineAppendParticles(
+						game.data.newParticles,
+						NewParticle(player.target.X, player.target.Y, midColor, 32.0, pixel.V(0.5, 1.0), 0.0, randomVector(1), 1.0, "ship"),
+					)
+				}
+
+				if win.JoystickPresent(currJoystick) {
+					moveVec := thumbstickVector(
+						win,
+						currJoystick,
+						pixelgl.AxisLeftX,
+						pixelgl.AxisLeftY,
+					)
+					direction = direction.Add(moveVec)
+				}
 			}
+
+			// paste debug.go
 		}
 
+		// main game update
 		if game.state == "playing" || game.state == "game_over" || game.data.mode == "menu_game" {
 			if game.data.mode == "menu_game" {
 				if player.target.Len() == 0 || player.origin.To(player.target).Len() < 5.0 {
@@ -2569,8 +2624,8 @@ func run() {
 
 				vel1 := baseVelocity.Add(perpVel).Add(randomVector((0.2)))
 				vel2 := baseVelocity.Sub(perpVel).Add(randomVector((0.2)))
-				game.data.particles = append(
-					game.data.particles,
+				game.data.newParticles = InlineAppendParticles(
+					game.data.newParticles,
 					NewParticle(pos.X, pos.Y, midColor, 32.0, pixel.V(0.5, 1.0), 0.0, baseVelocity, 1.0, "ship"),
 					NewParticle(pos.X, pos.Y, sideColor, 24.0, pixel.V(1.0, 1.0), 0.0, vel1.Scaled(1.5), 1.0, "ship"),
 					NewParticle(pos.X, pos.Y, sideColor, 24.0, pixel.V(1.0, 1.0), 0.0, vel2.Scaled(1.5), 1.0, "ship"),
@@ -2579,8 +2634,8 @@ func run() {
 				)
 
 				if player.speed > 600 {
-					game.data.particles = append(
-						game.data.particles,
+					game.data.newParticles = InlineAppendParticles(
+						game.data.newParticles,
 						NewParticle(pos.X, pos.Y, white, 32.0, pixel.V(1.0, 1.0), 0.0, vel1.Add(perpVel), 2.0, "ship"),
 						NewParticle(pos.X, pos.Y, white, 32.0, pixel.V(1.0, 1.0), 0.0, vel2.Sub(perpVel), 2.0, "ship"),
 					)
@@ -2588,9 +2643,6 @@ func run() {
 			}
 			player.Update(dt, totalTime, last)
 
-			scaledX := (win.MousePosition().X - (win.Bounds().W() / 2)) * (canvas.Bounds().W() / win.Bounds().W())
-			scaledY := (win.MousePosition().Y - (win.Bounds().H() / 2)) * (canvas.Bounds().H() / win.Bounds().H())
-			mp := pixel.V(scaledX, scaledY).Add(camPos)
 			aim := player.origin.To(mp)
 			gamepadAim := thumbstickVector(win, currJoystick, pixelgl.AxisRightX, pixelgl.AxisRightY)
 
@@ -2629,24 +2681,24 @@ func run() {
 					// fmt.Printf("Bullet spawned %s", time.Now().String())
 					rad := math.Atan2(aim.Unit().Y, aim.Unit().X)
 
-					bulletsToCreate := make([]bullet, 0)
 					if game.data.weapon.conicAngle > 0 {
 						ang1 := rad + (game.data.weapon.conicAngle * math.Pi / 180)
 						ang2 := rad - (game.data.weapon.conicAngle * math.Pi / 180)
 						ang1Vec := pixel.V(math.Cos(ang1), math.Sin(ang1))
 						ang2Vec := pixel.V(math.Cos(ang2), math.Sin(ang2))
 
-						bulletsToCreate = FireBullet(ang1Vec, game, player.origin, player, bulletsToCreate)
-						bulletsToCreate = FireBullet(ang2Vec, game, player.origin, player, bulletsToCreate)
+						// I really shouldn't use these weird side effect functions lol
+						FireBullet(ang1Vec, game, player.origin, player)
+						FireBullet(ang2Vec, game, player.origin, player)
 						m := player.origin.Add(aim.Unit().Scaled(10))
-						bulletsToCreate = FireBullet(aim, game, m, player, bulletsToCreate)
+						FireBullet(aim, game, m, player)
 					} else if game.data.weapon.randomCone > 0 {
 						for i := 0; i < game.data.weapon.bulletCount; i++ {
 							off := (rand.Float64() * game.data.weapon.randomCone) - game.data.weapon.randomCone/2
 							ang := rad + (off * math.Pi / 180)
 							d := game.data.weapon.duration + (-(game.data.weapon.duration / 4.0) + (rand.Float64() * (game.data.weapon.duration / 2.0)))
-							bulletsToCreate = append(
-								bulletsToCreate,
+							game.data.newBullets = InlineAppendBullets(
+								game.data.newBullets,
 								*NewBullet(
 									player.origin.X,
 									player.origin.Y,
@@ -2659,37 +2711,57 @@ func run() {
 							)
 						}
 					} else {
-						bulletsToCreate = FireBullet(aim, game, player.origin, player, bulletsToCreate)
+						FireBullet(aim, game, player.origin, player)
 					}
 
-					finalBullets := make([]bullet, 0)
-					for i := 0; i < len(bulletsToCreate); i++ {
-						b := bulletsToCreate[i]
-						finalBullets = append(finalBullets, b)
-						if game.data.weapon.reflective > 0 {
-							ang := 360 / float64(game.data.weapon.reflective+1)
+					// Reflective bullets procedure.
+					// Temporarily disabled.
+					// finalBullets := make([]bullet, 0)
+					// for i := 0; i < len(game.data.newBullets); i++ {
+					// 	b := game.data.newBullets[i]
+					// 	finalBullets = append(finalBullets, b)
+					// 	if game.data.weapon.reflective > 0 {
+					// 		ang := 360 / float64(game.data.weapon.reflective+1)
 
-							for j := 1; j <= game.data.weapon.reflective; j++ {
-								reflectiveAngle := b.data.orientation.Angle() + (float64(j) * ang * math.Pi / 180)
-								reflectiveAngleVec := pixel.V(math.Cos(reflectiveAngle), math.Sin(reflectiveAngle))
-								finalBullets = append(
-									finalBullets,
-									*NewBullet(
-										b.data.origin.X,
-										b.data.origin.Y,
-										game.data.weapon.bulletSize,
-										game.data.weapon.velocity,
-										reflectiveAngleVec,
-										append([]string{}, player.elements...),
-										game.data.weapon.duration,
-									),
-								)
+					// 		for j := 1; j <= game.data.weapon.reflective; j++ {
+					// 			reflectiveAngle := b.data.orientation.Angle() + (float64(j) * ang * math.Pi / 180)
+					// 			reflectiveAngleVec := pixel.V(math.Cos(reflectiveAngle), math.Sin(reflectiveAngle))
+					// 			finalBullets = append(
+					// 				finalBullets,
+					// 				*NewBullet(
+					// 					b.data.origin.X,
+					// 					b.data.origin.Y,
+					// 					game.data.weapon.bulletSize,
+					// 					game.data.weapon.velocity,
+					// 					reflectiveAngleVec,
+					// 					append([]string{}, player.elements...),
+					// 					game.data.weapon.duration,
+					// 				),
+					// 			)
+					// 		}
+					// 	}
+					// }
+
+					bulletID := 0
+					for addedID, newBullet := range game.data.newBullets {
+						if newBullet.velocity == (pixel.Vec{}) {
+							continue
+						}
+
+						if len(game.data.bullets) < cap(game.data.bullets) {
+							game.data.bullets = append(game.data.bullets, newBullet)
+							game.data.newBullets[addedID] = bullet{}
+						} else {
+							for bulletID < len(game.data.bullets) {
+								existing := game.data.bullets[bulletID]
+								if (existing.velocity == pixel.Vec{}) {
+									game.data.bullets[bulletID] = newBullet
+									game.data.newBullets[addedID] = bullet{}
+									break
+								}
+								bulletID++
 							}
 						}
-					}
-
-					for i := 0; i < len(finalBullets); i++ {
-						game.data.bullets = append(game.data.bullets, finalBullets[i])
 					}
 
 					overflow := timeSinceAbleToShoot * 1000
@@ -2806,8 +2878,8 @@ func run() {
 							pos2 := pixel.V(-1, 1).Rotated(e.orientation.Angle()).Scaled(e.radius).Add(e.origin)
 							pos3 := pixel.V(1, -1).Rotated(e.orientation.Angle()).Scaled(e.radius).Add(e.origin)
 							pos4 := pixel.V(-1, -1).Rotated(e.orientation.Angle()).Scaled(e.radius).Add(e.origin)
-							game.data.particles = append(
-								game.data.particles,
+							game.data.newParticles = InlineAppendParticles(
+								game.data.newParticles,
 								NewParticle(pos1.X, pos1.Y, midColor, 48.0, pixel.V(0.5, 1.0), 0.0, baseVelocity.Scaled(rand.Float64()*2.0), 1.0, "ship"),
 								NewParticle(pos2.X, pos1.Y, midColor, 48.0, pixel.V(0.5, 1.0), 0.0, baseVelocity.Scaled(rand.Float64()*2.0), 1.0, "ship"),
 								NewParticle(pos3.X, pos1.Y, midColor, 48.0, pixel.V(0.5, 1.0), 0.0, baseVelocity.Scaled(rand.Float64()*2.0), 1.0, "ship"),
@@ -2845,6 +2917,7 @@ func run() {
 
 			for i, b := range game.data.bullets {
 				if !b.data.alive {
+					game.data.bullets[i] = bullet{}
 					continue
 				}
 				b.data.origin = b.data.origin.Add(b.velocity.Scaled(dt))
@@ -2868,7 +2941,6 @@ func run() {
 				game.data.entities[eID] = e
 			}
 
-			entsToAdd := make([]entityData, 0, 100)
 			for bID, b := range game.data.entities {
 				if !b.alive || b.entityType != "blackhole" || !b.active {
 					continue
@@ -2884,8 +2956,8 @@ func run() {
 
 					color := colornames.Lightskyblue
 					pos := b.origin
-					game.data.particles = append(
-						game.data.particles,
+					game.data.newParticles = InlineAppendParticles(
+						game.data.newParticles,
 						NewParticle(pos.X,
 							pos.Y,
 							pixel.ToRGBA(color),
@@ -2912,7 +2984,7 @@ func run() {
 							rand.Float64()*200,
 						).Add(b.origin)
 						pleb := *NewAngryBubble(pos.X, pos.Y)
-						entsToAdd = append(entsToAdd, pleb)
+						game.data.newEntities = InlineAppendEntities(game.data.newEntities, pleb)
 					}
 					game.data.entities[bID] = b
 
@@ -2932,7 +3004,7 @@ func run() {
 							"enemy",
 						)
 
-						game.data.particles = append(game.data.particles, p)
+						game.data.newParticles = InlineAppendParticles(game.data.newParticles, p)
 					}
 
 					continue
@@ -3037,7 +3109,6 @@ func run() {
 
 				game.data.entities[bID] = b
 			}
-			game.data.entities = append(game.data.entities, entsToAdd...)
 
 			for _, e := range game.data.entities {
 				baseVelocity := e.pullVec.Scaled(0.05)
@@ -3048,8 +3119,8 @@ func run() {
 					pos2 := pixel.V(-1, 1).Rotated(e.orientation.Angle()).Scaled(e.radius).Add(e.origin)
 					pos3 := pixel.V(1, -1).Rotated(e.orientation.Angle()).Scaled(e.radius).Add(e.origin)
 					pos4 := pixel.V(-1, -1).Rotated(e.orientation.Angle()).Scaled(e.radius).Add(e.origin)
-					game.data.particles = append(
-						game.data.particles,
+					game.data.newParticles = InlineAppendParticles(
+						game.data.newParticles,
 						NewParticle(pos1.X, pos1.Y, midColor, 48.0, pixel.V(0.5, 1.0), 0.0, baseVelocity.Scaled(rand.Float64()*2.0), 1.0, "enemy"),
 						NewParticle(pos2.X, pos1.Y, midColor, 48.0, pixel.V(0.5, 1.0), 0.0, baseVelocity.Scaled(rand.Float64()*2.0), 1.0, "enemy"),
 						NewParticle(pos3.X, pos1.Y, midColor, 48.0, pixel.V(0.5, 1.0), 0.0, baseVelocity.Scaled(rand.Float64()*2.0), 1.0, "enemy"),
@@ -3113,12 +3184,18 @@ func run() {
 				}
 			}
 
-			entsToAdd = make([]entityData, 0, 100)
 			for bID, b := range game.data.bullets {
 				if b.data.alive {
 					for eID, e := range game.data.entities {
 						if e.alive && !e.spawning && b.data.Circle().Intersect(e.Circle()).Radius > 0 {
-							entsToAdd = b.DealDamage(&e, bID, 1, last, game, entsToAdd, player)
+							b.DealDamage(
+								&e,
+								bID,
+								1,
+								last,
+								game,
+								player,
+							)
 
 							if e.entityType == "blackhole" {
 								hitSound := blackholeHitBuffer.Streamer(0, blackholeHitBuffer.Len())
@@ -3130,7 +3207,14 @@ func run() {
 								}
 								speaker.Play(volume)
 							}
-							entsToAdd = e.DealDamage(&b.data, eID, 1, last, game, entsToAdd, player)
+							e.DealDamage(
+								&b.data,
+								eID,
+								1,
+								last,
+								game,
+								player,
+							)
 
 							game.data.entities[eID] = e
 							break
@@ -3159,7 +3243,7 @@ func run() {
 								1.0,
 								"bullet",
 							)
-							game.data.particles = append(game.data.particles, p)
+							game.data.newParticles = InlineAppendParticles(game.data.newParticles, p)
 						}
 
 						b.data.alive = false
@@ -3177,10 +3261,16 @@ func run() {
 				}
 
 				if player.alive && e.alive && !e.spawning && intersectionTest {
-					e.IntersectWithPlayer(e, eID, game, player, last, entsToAdd, gameOverTxt)
+					e.IntersectWithPlayer(
+						e,
+						eID,
+						game,
+						player,
+						last,
+						gameOverTxt,
+					)
 				}
 			}
-			game.data.entities = append(game.data.entities, entsToAdd...)
 
 			if len(player.elements) > 0 {
 				SetDefaultPlayerSpeed(player)
@@ -3284,7 +3374,7 @@ func run() {
 				}
 				speaker.Play(volume)
 
-				for i := 0; i < 2400; i++ {
+				for i := 0; i < 1000; i++ {
 					speed := 48.0 * (1.0 - 1/((rand.Float64()*32.0)+1))
 					col := int(rand.Float32() * float32(len(player.elements)))
 					p := NewParticle(
@@ -3298,7 +3388,7 @@ func run() {
 						2.0,
 						"player",
 					)
-					game.data.particles = append(game.data.particles, p)
+					game.data.newParticles = InlineAppendParticles(game.data.newParticles, p)
 				}
 
 				game.data.lastBomb = time.Now()
@@ -3314,6 +3404,11 @@ func run() {
 				player.elements = make([]string, 0)
 			}
 
+			// Keep buffered particles ticking so they don't stack up too much
+			for pID, p := range game.data.newParticles {
+				p.percentLife -= 1.0 / p.duration
+				game.data.newParticles[pID] = p
+			}
 			for pID, p := range game.data.particles {
 				if p != (particle{}) {
 					p.origin = p.origin.Add(p.velocity)
@@ -3359,33 +3454,80 @@ func run() {
 			}
 
 			// kill particles
-			newParticles := make([]particle, 0, maxParticles)
-			for _, p := range game.data.particles {
-				if p.percentLife > 0 {
-					newParticles = append(newParticles, p)
+			killedParticles := 0
+			for particleID, existing := range game.data.newParticles {
+				if (existing != particle{}) && existing.percentLife <= 0 {
+					game.data.newParticles[particleID] = particle{}
 				}
 			}
-			game.data.particles = newParticles
+			for particleID, existing := range game.data.particles {
+				if (existing != particle{}) && existing.percentLife <= 0 {
+					game.data.particles[particleID] = particle{}
+					killedParticles++
+				}
+			}
+			killedEnt := 0
+			for entID, existing := range game.data.entities {
+				if (!existing.alive && existing.born != time.Time{}) || (existing.expiry != time.Time{}) && last.After(existing.expiry) {
+					game.data.entities[entID] = entityData{}
+					killedEnt++
+				} // kill entities
+			}
+			// fmt.Printf("Killed\t(%d entities)\t(%d particles)\n", killedEnt, killedParticles)
 
-			// kill entities
-			newEntities := make([]entityData, 0, 100)
-			for _, e := range game.data.entities {
-				if e.alive || (e.expiry != time.Time{} && last.Before(e.expiry)) {
-					newEntities = append(newEntities, e)
+			particleID := 0
+			for addedID, newParticle := range game.data.newParticles {
+				if newParticle != (particle{}) {
+					if len(game.data.particles) < cap(game.data.particles) {
+						game.data.particles = append(game.data.particles, newParticle)
+						game.data.newParticles[addedID] = particle{}
+					} else {
+						for particleID < len(game.data.particles) {
+							existing := game.data.particles[particleID]
+							if existing == (particle{}) {
+								game.data.particles[particleID] = newParticle
+								game.data.newParticles[addedID] = particle{}
+								break
+							}
+							particleID++
+						}
+					}
 				}
 			}
-			game.data.entities = newEntities
+
+			entID := 0
+			toSpawn := 0
+			spawnedEnt := 0
+			for addedID, newEnt := range game.data.newEntities {
+				if newEnt.entityType != "" {
+					toSpawn++
+					if len(game.data.entities) < cap(game.data.entities) {
+						game.data.entities = append(game.data.entities, newEnt)
+						game.data.newEntities[addedID] = entityData{}
+						spawnedEnt++
+						entID++
+					} else {
+						for entID < len(game.data.entities) {
+							existing := game.data.entities[entID]
+							if existing.origin == (pixel.Vec{}) {
+								game.data.entities[entID] = newEnt
+								game.data.newEntities[addedID] = entityData{}
+								spawnedEnt++
+								break
+							}
+							entID++
+						}
+					}
+				}
+			} // bring in new entities
+			// fmt.Printf("Killed: %d	To Spawn: %d	Spawned: %d\n", killedEnt, toSpawn, spawnedEnt)
 
 			// kill bullets
-			newBullets := make([]bullet, 100)
-			for _, b := range game.data.bullets {
-				if b.data.alive && b.data.born.After(time.Now().Add(time.Duration(-b.duration*1000)*time.Millisecond)) {
-					newBullets = append(newBullets, b)
-				} else {
-					b.data.alive = false
+			for bID, b := range game.data.bullets {
+				if !b.data.alive && time.Now().After(b.data.born.Add(time.Duration(b.duration*1000)*time.Millisecond)) {
+					game.data.bullets[bID] = bullet{}
 				}
 			}
-			game.data.bullets = newBullets
 
 			if game.data.mode == "evolved" || game.data.mode == "menu_game" {
 				game.evolvedGameModeUpdate(debug, last, totalTime, player)
@@ -3395,711 +3537,776 @@ func run() {
 		}
 
 		// draw_
-		imd.Clear()
+		{
+			imd.Clear()
 
-		if game.state == "paused" || game.data.mode == "menu_game" || game.state == "game_over" {
-			a := (math.Min(totalTime, 4) / 8.0)
-			canvas.SetColorMask(pixel.Alpha(a))
-			uiCanvas.SetColorMask(pixel.Alpha(math.Min(1.0, a*4)))
-		} else {
-			canvas.SetColorMask(pixel.Alpha(1.0))
-		}
-
-		// Draw: grid effect
-		// TODO, extract?
-		// Add catmullrom splines?
-		if game.data.mode == "evolved" || game.data.mode == "pacifism" || game.data.mode == "menu_game" {
-			width := len(game.grid.points)
-			height := len(game.grid.points[0])
-			imd.SetColorMask(pixel.Alpha(0.1))
-			hue := math.Mod((3.6 + ((math.Mod(totalTime, 300.0) / 300.0) * 6.0)), 6.0)
-			imd.Color = HSVToColor(hue, 0.5, 1.0)
-
-			for y := 0; y < height; y++ {
-				for x := 0; x < width; x++ {
-					left, up := pixel.ZV, pixel.ZV
-					p := game.grid.points[x][y].origin.ToVec2(cfg.Bounds)
-
-					// fmt.Printf("Drawing point %f %f\n", p.X, p.Y)
-					if x > 0 {
-						left = game.grid.points[x-1][y].origin.ToVec2(cfg.Bounds)
-						if withinWorld(p) || withinWorld(left) {
-							// It's possible that one but not the other point is brought in from out of the world boundary
-							// If being brought in from out of the world, render right on the border
-							enforceWorldBoundary(&p, 0.0)
-							enforceWorldBoundary(&left, 0.0)
-							thickness := 1.0
-							if y%2 == 0 {
-								thickness = 4.0
-							}
-							imd.Push(left, p)
-							imd.Line(thickness)
-						}
-					}
-					if y > 0 {
-						up = game.grid.points[x][y-1].origin.ToVec2(cfg.Bounds)
-						if withinWorld(p) || withinWorld(up) {
-							// It's possible that one but not the other point is brought in from out of the world boundary
-							// If being brought in from out of the world, render right on the border
-							enforceWorldBoundary(&p, 0.0)
-							enforceWorldBoundary(&up, 0.0)
-							thickness := 1.0
-							if x%2 == 0 {
-								thickness = 4.0
-							}
-							imd.Push(up, p)
-							imd.Line(thickness)
-						}
-					}
-
-					if x > 0 && y > 0 {
-						upLeft := game.grid.points[x-1][y-1].origin.ToVec2(cfg.Bounds)
-						p1, p2 := upLeft.Add(up).Scaled(0.5), left.Add(p).Scaled(0.5)
-
-						if withinWorld(p1) || withinWorld(p2) {
-							enforceWorldBoundary(&p1, 0.0)
-							enforceWorldBoundary(&p2, 0.0)
-							imd.Push(p1, p2)
-							imd.Line(1.0)
-						}
-
-						p3, p4 := upLeft.Add(left).Scaled(0.5), up.Add(p).Scaled(0.5)
-
-						if withinWorld(p3) || withinWorld(p4) {
-							enforceWorldBoundary(&p3, 0.0)
-							enforceWorldBoundary(&p4, 0.0)
-							imd.Push(p3, p4)
-							imd.Line(1.0)
-						}
-					}
-				}
-			}
-		}
-
-		if game.data.mode == "evolved" || game.data.mode == "pacifism" || game.data.mode == "menu_game" {
-			// draw: particles
-			imd.SetColorMask(pixel.Alpha(0.4))
-			for _, p := range game.data.particles {
-				particleDraw.Clear()
-				if p != (particle{}) {
-					defaultSize := pixel.V(8, 2)
-					pModel := defaultSize.ScaledXY(p.scale)
-					particleDraw.Color = p.colour
-					particleDraw.SetColorMask(pixel.Alpha(p.colour.A))
-					particleDraw.SetMatrix(pixel.IM.Rotated(pixel.ZV, p.orientation).Moved(p.origin))
-					particleDraw.Push(pixel.V(-pModel.X/2, 0.0), pixel.V(pModel.X/2, 0.0))
-					particleDraw.Line(pModel.Y)
-					particleDraw.Draw(imd)
-				}
+			if game.state == "paused" || game.data.mode == "menu_game" || game.state == "game_over" {
+				a := (math.Min(totalTime, 4) / 8.0)
+				canvas.SetColorMask(pixel.Alpha(a))
+				uiCanvas.SetColorMask(pixel.Alpha(math.Min(1.0, a*4)))
+			} else {
+				canvas.SetColorMask(pixel.Alpha(1.0))
 			}
 
-			imd.Color = colornames.White
-			imd.SetColorMask(pixel.Alpha(1))
+			// Draw: grid effect
+			// TODO, extract?
+			// Add catmullrom splines?
+			if game.data.mode == "evolved" || game.data.mode == "pacifism" || game.data.mode == "menu_game" {
+				width := len(game.grid.points)
+				height := len(game.grid.points[0])
+				imd.SetColorMask(pixel.Alpha(0.1))
+				hue := math.Mod((3.6 + ((math.Mod(totalTime, 300.0) / 300.0) * 6.0)), 6.0)
+				imd.Color = HSVToColor(hue, 0.5, 1.0)
 
-			// draw: player
-			if player.alive {
-				d := imdraw.New(nil)
-				d.SetMatrix(pixel.IM.Rotated(pixel.ZV, player.orientation.Angle()).Moved(player.origin))
-				d.Push(pixel.ZV)
+				for y := 0; y < height; y++ {
+					for x := 0; x < width; x++ {
+						left, up := pixel.ZV, pixel.ZV
+						p := game.grid.points[x][y].origin.ToVec2(cfg.Bounds)
 
-				size := 20.0
-				rad := 4.0
-				d.Circle(size, rad)
-				d.Push(pixel.ZV)
-				d.CircleArc(28.0, 0.3, -0.3, 2.0)
-
-				// d.Push(pixel.ZV)
-				// d.CircleArc(28.0, 0.2, -0.2, 2.0)
-				d.Color = colornames.Lightsteelblue
-
-				if (game.data.weapon != weapondata{}) {
-					d.SetMatrix(pixel.IM.Moved(player.origin))
-					d.Push(pixel.V(12.0, 0.0).Rotated(player.relativeTarget.Angle()))
-					d.Circle(4.0, 2.0)
-				}
-				// playerDraw.Draw(d)
-				d.Draw(imd)
-
-				// draw: elements
-				// e := imdraw.New(nil)
-				// e.SetMatrix(pixel.IM.Moved(player.origin.Add(pixel.V(-32, -40))))
-				// for i := 0; i < len(player.elements); i++ {
-				// 	element := player.elements[i]
-				// 	e.Color = elements[element]
-
-				// 	e.Push(pixel.V(float64(i)*32, 0))
-				// 	e.Circle(12, 4)
-				// }
-				// e.Draw(imd)
-				// c := pixelgl.NewCanvas(pixel.R(-200, -200, 200, 200))
-				// wardInner.Draw(c, pixel.IM)
-				// wardOuter.Draw(c, pixel.IM)
-				// c.DrawColorMask(imd, pixel.IM, elementLifeColor)
-			}
-
-			// lastBomb := game.data.lastBomb.Sub(last).Seconds()
-			// if game.data.lastBomb.Sub(last).Seconds() < 1.0 {
-			// 	// draw: bomb
-			// 	imd.Color = colornames.White
-			// 	imd.Push(player.origin)
-			// 	imd.Circle(lastBomb*2048.0, 64)
-			// }
-
-			// imd.Push(player.rect.Min, player.rect.Max)
-			// imd.Rectangle(2)
-
-			// draw: enemies
-			imd.Color = colornames.Lightskyblue
-			for _, e := range game.data.entities {
-				if e.alive {
-					imd.SetColorMask(pixel.Alpha(1))
-					size := e.radius
-					if e.spawning {
-						imd.SetColorMask(pixel.Alpha(0.7))
-						timeSinceBorn := last.Sub(e.born).Seconds()
-						spawnIndicatorT := e.spawnTime / 2.0
-
-						size = e.radius * (math.Mod(timeSinceBorn, spawnIndicatorT) / spawnIndicatorT)
-						if e.entityType == "blackhole" {
-							size = e.radius * ((timeSinceBorn) / e.spawnTime) // grow from small to actual size
-						}
-					}
-
-					if e.entityType == "wanderer" {
-						tmpTarget.Clear()
-						tmpTarget.Color = e.color
-						baseTransform := pixel.IM.Rotated(pixel.ZV, e.orientation.Angle()).Moved(e.origin)
-						tmpTarget.SetMatrix(baseTransform)
-						tmpTarget.Push(
-							pixel.V(0, size),
-							pixel.V(2, 1).Scaled(size/8),
-							pixel.V(0, size).Rotated(-120.0*math.Pi/180),
-							pixel.V(0, -2.236).Scaled(size/8),
-							pixel.V(0, size).Rotated(120.0*math.Pi/180),
-							pixel.V(-2, 1).Scaled(size/8),
-						)
-						tmpTarget.Polygon(3)
-						tmpTarget.Push(
-							pixel.V(0, size).Rotated(60.0*math.Pi/180),
-							pixel.V(2, 1).Scaled(size/8).Rotated(60.0*math.Pi/180),
-							pixel.V(0, size).Rotated(-120.0*math.Pi/180).Rotated(60.0*math.Pi/180),
-							pixel.V(0, -2.236).Scaled(size/8).Rotated(60.0*math.Pi/180),
-							pixel.V(0, size).Rotated(120.0*math.Pi/180).Rotated(60.0*math.Pi/180),
-							pixel.V(-2, 1).Scaled(size/8).Rotated(60.0*math.Pi/180),
-						)
-						tmpTarget.Polygon(3)
-						tmpTarget.Draw(imd)
-					} else if e.entityType == "blackhole" {
-						imd.Color = pixel.ToRGBA(e.color)
-						if e.active {
-							heartRate := 0.5 - ((float64(e.hp) / 15.0) * 0.35)
-							volatility := (math.Mod(totalTime, heartRate) / heartRate)
-							size += (5 * volatility)
-
-							ringWeight := 2.0
-							if volatility > 0 {
-								ringWeight += (3 * volatility)
-							}
-
-							hue := (math.Mod(last.Sub(e.born).Seconds(), 6.0))
-							baseColor := HSVToColor(hue, 0.5+(volatility/2), 1.0)
-							baseColor = baseColor.Add(pixel.Alpha(volatility / 2))
-
-							imd.Color = baseColor
-							imd.Push(e.origin)
-							imd.Circle(size, ringWeight)
-
-							v2 := math.Mod(volatility+0.5, 1.0)
-							hue2 := (math.Mod(last.Sub(e.born).Seconds()+1.0, 6.0))
-							baseColor2 := HSVToColor(hue2, 0.5+(v2/2), 1.0)
-							baseColor2 = baseColor2.Add(pixel.Alpha(v2 / 2))
-							imd.Color = baseColor2
-							imd.Push(e.origin)
-							imd.Circle(size-ringWeight, ringWeight)
-						} else {
-							imd.Push(e.origin)
-							imd.Circle(size, float64(4))
-						}
-					} else {
-						tmpTarget.Clear()
-						tmpTarget.SetMatrix(pixel.IM.Rotated(e.origin, e.orientation.Angle()))
-						weight := 3.0
-						if e.entityType == "follower" {
-							tmpTarget.Color = e.color
-
-							growth := size / 10.0
-							timeSinceBorn := last.Sub(e.born).Seconds()
-
-							xRad := (size * 1.2) + (growth * math.Sin(2*math.Pi*(math.Mod(timeSinceBorn, 2.0)/2.0)))
-							yRad := (size * 1.2) + (growth * -math.Cos(2*math.Pi*(math.Mod(timeSinceBorn, 2.0)/2.0)))
-							tmpTarget.Push(
-								pixel.V(e.origin.X-xRad, e.origin.Y),
-								pixel.V(e.origin.X, e.origin.Y+yRad),
-								pixel.V(e.origin.X+xRad, e.origin.Y),
-								pixel.V(e.origin.X, e.origin.Y-yRad),
-								pixel.V(e.origin.X-xRad, e.origin.Y),
-							)
-							tmpTarget.Polygon(weight)
-						} else if e.entityType == "pink" {
-							weight = 4.0
-							tmpTarget.Color = e.color
-							tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y-size), pixel.V(e.origin.X+size, e.origin.Y+size))
-							tmpTarget.Rectangle(weight)
-							tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y-size), pixel.V(e.origin.X+size, e.origin.Y+size))
-							tmpTarget.Line(weight)
-							tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y+size), pixel.V(e.origin.X+size, e.origin.Y-size))
-							tmpTarget.Line(weight)
-						} else if e.entityType == "pinkpleb" {
-							weight = 3.0
-							tmpTarget.Color = e.color
-							tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y-size), pixel.V(e.origin.X+size, e.origin.Y+size))
-							tmpTarget.Rectangle(weight)
-							tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y-size), pixel.V(e.origin.X+size, e.origin.Y+size))
-							tmpTarget.Line(weight)
-							tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y+size), pixel.V(e.origin.X+size, e.origin.Y-size))
-							tmpTarget.Line(weight)
-						} else if e.entityType == "bubble" {
-							weight = 2.0
-							tmpTarget.Color = pixel.ToRGBA(color.RGBA{66, 135, 245, 192})
-							tmpTarget.Push(e.origin)
-							tmpTarget.Circle(e.radius, weight)
-						} else if e.entityType == "dodger" {
-							weight = 3.0
-							tmpTarget.SetColorMask(pixel.Alpha(0.8))
-							tmpTarget.Color = e.color
-							tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y-size), pixel.V(e.origin.X+size, e.origin.Y+size))
-							tmpTarget.Rectangle(weight)
-							tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y), pixel.V(e.origin.X, e.origin.Y+size))
-							tmpTarget.Push(pixel.V(e.origin.X+size, e.origin.Y), pixel.V(e.origin.X, e.origin.Y-size))
-							tmpTarget.Polygon(weight)
-							// tmpTarget.Push(e.origin)
-							// tmpTarget.Circle(e.radius, 1.0)
-						} else if e.entityType == "snek" {
-							weight = 3.0
-							// outline := 8.0
-							tmpTarget.SetMatrix(pixel.IM.Rotated(pixel.ZV, e.orientation.Angle()-math.Pi/2).Moved(e.origin))
-							tmpTarget.Color = e.color
-							tmpTarget.Push(pixel.ZV)
-							// small := r / 12.0
-							// medium := r / 4.0
-							// large := r / 2.0
-
-							// tmpTarget.Push(
-							// 	pixel.ZV,
-							// 	pixel.V(-large, medium),
-							// 	pixel.V(-large-medium, large+medium),
-							// 	pixel.V(-large-medium, medium),
-							// 	pixel.V(-large, -large),
-							// 	pixel.V(0.0, -large),
-							// 	pixel.V(large, -large),
-							// 	pixel.V(large+medium, medium),
-							// 	pixel.V(large+medium, large+medium),
-							// 	pixel.V(large, medium),
-							// )
-							tmpTarget.Circle(e.radius, weight)
-
-							tmpTarget.SetMatrix(pixel.IM)
-							tmpTarget.Color = colornames.Blueviolet
-							for _, snekT := range e.tail {
-								if snekT.entityType != "snektail" {
-									continue
+						// fmt.Printf("Drawing point %f %f\n", p.X, p.Y)
+						if x > 0 {
+							left = game.grid.points[x-1][y].origin.ToVec2(cfg.Bounds)
+							if withinWorld(p) || withinWorld(left) {
+								// It's possible that one but not the other point is brought in from out of the world boundary
+								// If being brought in from out of the world, render right on the border
+								enforceWorldBoundary(&p, 0.0)
+								enforceWorldBoundary(&left, 0.0)
+								thickness := 1.0
+								if y%2 == 0 {
+									thickness = 4.0
 								}
-								tmpTarget.Push(
-									snekT.origin,
-								)
-								tmpTarget.Circle(snekT.radius, 3.0)
+								imd.Push(left, p)
+								imd.Line(thickness)
 							}
-						} else if e.entityType == "replicator" {
-							tmpTarget.Color = colornames.Orangered
-							tmpTarget.Push(e.origin)
-							tmpTarget.Circle(e.radius, 4.0)
-						} else if e.entityType == "gate" {
-							tmpTarget.Color = colornames.Lightyellow
-							tmpTarget.Push(e.origin.Add(pixel.V(-e.radius, 0.0)), e.origin.Add(pixel.V(e.radius, 0.0)))
-							tmpTarget.Line(4.0)
 						}
-						tmpTarget.Draw(imd)
+						if y > 0 {
+							up = game.grid.points[x][y-1].origin.ToVec2(cfg.Bounds)
+							if withinWorld(p) || withinWorld(up) {
+								// It's possible that one but not the other point is brought in from out of the world boundary
+								// If being brought in from out of the world, render right on the border
+								enforceWorldBoundary(&p, 0.0)
+								enforceWorldBoundary(&up, 0.0)
+								thickness := 1.0
+								if x%2 == 0 {
+									thickness = 4.0
+								}
+								imd.Push(up, p)
+								imd.Line(thickness)
+							}
+						}
+
+						if x > 0 && y > 0 {
+							upLeft := game.grid.points[x-1][y-1].origin.ToVec2(cfg.Bounds)
+							p1, p2 := upLeft.Add(up).Scaled(0.5), left.Add(p).Scaled(0.5)
+
+							if withinWorld(p1) || withinWorld(p2) {
+								enforceWorldBoundary(&p1, 0.0)
+								enforceWorldBoundary(&p2, 0.0)
+								imd.Push(p1, p2)
+								imd.Line(1.0)
+							}
+
+							p3, p4 := upLeft.Add(left).Scaled(0.5), up.Add(p).Scaled(0.5)
+
+							if withinWorld(p3) || withinWorld(p4) {
+								enforceWorldBoundary(&p3, 0.0)
+								enforceWorldBoundary(&p4, 0.0)
+								imd.Push(p3, p4)
+								imd.Line(1.0)
+							}
+						}
 					}
 				}
 			}
 
-			for _, b := range game.data.bullets {
-				if b.data.alive {
-					bulletDraw.Clear()
-					bulletDraw.SetMatrix(pixel.IM.Rotated(pixel.ZV, b.data.orientation.Angle()-math.Pi/2).Moved(b.data.origin))
-					bulletDraw.SetColorMask(pixel.Alpha(0.9 - (time.Since(b.data.born).Seconds() / b.duration)))
-					drawBullet(&b.data, bulletDraw)
-					bulletDraw.Draw(imd)
+			if game.data.mode == "evolved" || game.data.mode == "pacifism" || game.data.mode == "menu_game" {
+				// draw: particles
+				imd.SetColorMask(pixel.Alpha(0.4))
+				for _, p := range game.data.particles {
+					particleDraw.Clear()
+					if p != (particle{}) {
+						defaultSize := pixel.V(8, 2)
+						pModel := defaultSize.ScaledXY(p.scale)
+						particleDraw.Color = p.colour
+						particleDraw.SetColorMask(pixel.Alpha(p.colour.A))
+						particleDraw.SetMatrix(pixel.IM.Rotated(pixel.ZV, p.orientation).Moved(p.origin))
+						particleDraw.Push(pixel.V(-pModel.X/2, 0.0), pixel.V(pModel.X/2, 0.0))
+						particleDraw.Line(pModel.Y)
+						particleDraw.Draw(imd)
+					}
+				}
+
+				imd.Color = colornames.White
+				imd.SetColorMask(pixel.Alpha(1))
+
+				// draw: player
+				if player.alive {
+					d := imdraw.New(nil)
+					d.SetMatrix(pixel.IM.Rotated(pixel.ZV, player.orientation.Angle()).Moved(player.origin))
+					d.Push(pixel.ZV)
+
+					size := 20.0
+					rad := 4.0
+					d.Circle(size, rad)
+					d.Push(pixel.ZV)
+					d.CircleArc(28.0, 0.3, -0.3, 2.0)
+
+					// d.Push(pixel.ZV)
+					// d.CircleArc(28.0, 0.2, -0.2, 2.0)
+					d.Color = colornames.Lightsteelblue
+
+					if (game.data.weapon != weapondata{}) {
+						d.SetMatrix(pixel.IM.Moved(player.origin))
+						d.Push(pixel.V(12.0, 0.0).Rotated(player.relativeTarget.Angle()))
+						d.Circle(4.0, 2.0)
+					}
+					// playerDraw.Draw(d)
+					d.Draw(imd)
+
+					// draw: elements
+					// e := imdraw.New(nil)
+					// e.SetMatrix(pixel.IM.Moved(player.origin.Add(pixel.V(-32, -40))))
+					// for i := 0; i < len(player.elements); i++ {
+					// 	element := player.elements[i]
+					// 	e.Color = elements[element]
+
+					// 	e.Push(pixel.V(float64(i)*32, 0))
+					// 	e.Circle(12, 4)
+					// }
+					// e.Draw(imd)
+					// c := pixelgl.NewCanvas(pixel.R(-200, -200, 200, 200))
+					// wardInner.Draw(c, pixel.IM)
+					// wardOuter.Draw(c, pixel.IM)
+					// c.DrawColorMask(imd, pixel.IM, elementLifeColor)
+				}
+
+				// lastBomb := game.data.lastBomb.Sub(last).Seconds()
+				// if game.data.lastBomb.Sub(last).Seconds() < 1.0 {
+				// 	// draw: bomb
+				// 	imd.Color = colornames.White
+				// 	imd.Push(player.origin)
+				// 	imd.Circle(lastBomb*2048.0, 64)
+				// }
+
+				// imd.Push(player.rect.Min, player.rect.Max)
+				// imd.Rectangle(2)
+
+				// draw: enemies
+				imd.Color = colornames.Lightskyblue
+				for _, e := range game.data.entities {
+					if e.alive {
+						imd.SetColorMask(pixel.Alpha(1))
+						size := e.radius
+						if e.spawning {
+							imd.SetColorMask(pixel.Alpha(0.7))
+							timeSinceBorn := last.Sub(e.born).Seconds()
+							spawnIndicatorT := e.spawnTime / 2.0
+
+							size = e.radius * (math.Mod(timeSinceBorn, spawnIndicatorT) / spawnIndicatorT)
+							if e.entityType == "blackhole" {
+								size = e.radius * ((timeSinceBorn) / e.spawnTime) // grow from small to actual size
+							}
+						}
+
+						if e.entityType == "wanderer" {
+							tmpTarget.Clear()
+							tmpTarget.Color = e.color
+							baseTransform := pixel.IM.Rotated(pixel.ZV, e.orientation.Angle()).Moved(e.origin)
+							tmpTarget.SetMatrix(baseTransform)
+							tmpTarget.Push(
+								pixel.V(0, size),
+								pixel.V(2, 1).Scaled(size/8),
+								pixel.V(0, size).Rotated(-120.0*math.Pi/180),
+								pixel.V(0, -2.236).Scaled(size/8),
+								pixel.V(0, size).Rotated(120.0*math.Pi/180),
+								pixel.V(-2, 1).Scaled(size/8),
+							)
+							tmpTarget.Polygon(3)
+							tmpTarget.Push(
+								pixel.V(0, size).Rotated(60.0*math.Pi/180),
+								pixel.V(2, 1).Scaled(size/8).Rotated(60.0*math.Pi/180),
+								pixel.V(0, size).Rotated(-120.0*math.Pi/180).Rotated(60.0*math.Pi/180),
+								pixel.V(0, -2.236).Scaled(size/8).Rotated(60.0*math.Pi/180),
+								pixel.V(0, size).Rotated(120.0*math.Pi/180).Rotated(60.0*math.Pi/180),
+								pixel.V(-2, 1).Scaled(size/8).Rotated(60.0*math.Pi/180),
+							)
+							tmpTarget.Polygon(3)
+							tmpTarget.Draw(imd)
+						} else if e.entityType == "blackhole" {
+							imd.Color = pixel.ToRGBA(e.color)
+							if e.active {
+								heartRate := 0.5 - ((float64(e.hp) / 15.0) * 0.35)
+								volatility := (math.Mod(totalTime, heartRate) / heartRate)
+								size += (5 * volatility)
+
+								ringWeight := 2.0
+								if volatility > 0 {
+									ringWeight += (3 * volatility)
+								}
+
+								hue := (math.Mod(last.Sub(e.born).Seconds(), 6.0))
+								baseColor := HSVToColor(hue, 0.5+(volatility/2), 1.0)
+								baseColor = baseColor.Add(pixel.Alpha(volatility / 2))
+
+								imd.Color = baseColor
+								imd.Push(e.origin)
+								imd.Circle(size, ringWeight)
+
+								v2 := math.Mod(volatility+0.5, 1.0)
+								hue2 := (math.Mod(last.Sub(e.born).Seconds()+1.0, 6.0))
+								baseColor2 := HSVToColor(hue2, 0.5+(v2/2), 1.0)
+								baseColor2 = baseColor2.Add(pixel.Alpha(v2 / 2))
+								imd.Color = baseColor2
+								imd.Push(e.origin)
+								imd.Circle(size-ringWeight, ringWeight)
+							} else {
+								imd.Push(e.origin)
+								imd.Circle(size, float64(4))
+							}
+						} else {
+							tmpTarget.Clear()
+							tmpTarget.SetMatrix(pixel.IM.Rotated(e.origin, e.orientation.Angle()))
+							weight := 3.0
+							if e.entityType == "follower" {
+								tmpTarget.Color = e.color
+
+								growth := size / 10.0
+								timeSinceBorn := last.Sub(e.born).Seconds()
+
+								xRad := (size * 1.2) + (growth * math.Sin(2*math.Pi*(math.Mod(timeSinceBorn, 2.0)/2.0)))
+								yRad := (size * 1.2) + (growth * -math.Cos(2*math.Pi*(math.Mod(timeSinceBorn, 2.0)/2.0)))
+								tmpTarget.Push(
+									pixel.V(e.origin.X-xRad, e.origin.Y),
+									pixel.V(e.origin.X, e.origin.Y+yRad),
+									pixel.V(e.origin.X+xRad, e.origin.Y),
+									pixel.V(e.origin.X, e.origin.Y-yRad),
+									pixel.V(e.origin.X-xRad, e.origin.Y),
+								)
+								tmpTarget.Polygon(weight)
+							} else if e.entityType == "pink" {
+								weight = 4.0
+								tmpTarget.Color = e.color
+								tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y-size), pixel.V(e.origin.X+size, e.origin.Y+size))
+								tmpTarget.Rectangle(weight)
+								tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y-size), pixel.V(e.origin.X+size, e.origin.Y+size))
+								tmpTarget.Line(weight)
+								tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y+size), pixel.V(e.origin.X+size, e.origin.Y-size))
+								tmpTarget.Line(weight)
+							} else if e.entityType == "pinkpleb" {
+								weight = 3.0
+								tmpTarget.Color = e.color
+								tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y-size), pixel.V(e.origin.X+size, e.origin.Y+size))
+								tmpTarget.Rectangle(weight)
+								tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y-size), pixel.V(e.origin.X+size, e.origin.Y+size))
+								tmpTarget.Line(weight)
+								tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y+size), pixel.V(e.origin.X+size, e.origin.Y-size))
+								tmpTarget.Line(weight)
+							} else if e.entityType == "bubble" {
+								weight = 2.0
+								tmpTarget.Color = pixel.ToRGBA(color.RGBA{66, 135, 245, 192})
+								tmpTarget.Push(e.origin)
+								tmpTarget.Circle(e.radius, weight)
+							} else if e.entityType == "dodger" {
+								weight = 3.0
+								tmpTarget.SetColorMask(pixel.Alpha(0.8))
+								tmpTarget.Color = e.color
+								tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y-size), pixel.V(e.origin.X+size, e.origin.Y+size))
+								tmpTarget.Rectangle(weight)
+								tmpTarget.Push(pixel.V(e.origin.X-size, e.origin.Y), pixel.V(e.origin.X, e.origin.Y+size))
+								tmpTarget.Push(pixel.V(e.origin.X+size, e.origin.Y), pixel.V(e.origin.X, e.origin.Y-size))
+								tmpTarget.Polygon(weight)
+								// tmpTarget.Push(e.origin)
+								// tmpTarget.Circle(e.radius, 1.0)
+							} else if e.entityType == "snek" {
+								weight = 3.0
+								// outline := 8.0
+								tmpTarget.SetMatrix(pixel.IM.Rotated(pixel.ZV, e.orientation.Angle()-math.Pi/2).Moved(e.origin))
+								tmpTarget.Color = e.color
+								tmpTarget.Push(pixel.ZV)
+								// small := r / 12.0
+								// medium := r / 4.0
+								// large := r / 2.0
+
+								// tmpTarget.Push(
+								// 	pixel.ZV,
+								// 	pixel.V(-large, medium),
+								// 	pixel.V(-large-medium, large+medium),
+								// 	pixel.V(-large-medium, medium),
+								// 	pixel.V(-large, -large),
+								// 	pixel.V(0.0, -large),
+								// 	pixel.V(large, -large),
+								// 	pixel.V(large+medium, medium),
+								// 	pixel.V(large+medium, large+medium),
+								// 	pixel.V(large, medium),
+								// )
+								tmpTarget.Circle(e.radius, weight)
+
+								tmpTarget.SetMatrix(pixel.IM)
+								tmpTarget.Color = colornames.Blueviolet
+								for _, snekT := range e.tail {
+									if snekT.entityType != "snektail" {
+										continue
+									}
+									tmpTarget.Push(
+										snekT.origin,
+									)
+									tmpTarget.Circle(snekT.radius, 3.0)
+								}
+							} else if e.entityType == "replicator" {
+								tmpTarget.Color = colornames.Orangered
+								tmpTarget.Push(e.origin)
+								tmpTarget.Circle(e.radius, 4.0)
+							} else if e.entityType == "gate" {
+								tmpTarget.Color = colornames.Lightyellow
+								tmpTarget.Push(e.origin.Add(pixel.V(-e.radius, 0.0)), e.origin.Add(pixel.V(e.radius, 0.0)))
+								tmpTarget.Line(4.0)
+							}
+							tmpTarget.Draw(imd)
+						}
+					}
+				}
+
+				for _, b := range game.data.bullets {
+					if b.data.alive {
+						bulletDraw.Clear()
+						bulletDraw.SetMatrix(pixel.IM.Rotated(pixel.ZV, b.data.orientation.Angle()-math.Pi/2).Moved(b.data.origin))
+						bulletDraw.SetColorMask(pixel.Alpha(0.9 - (time.Since(b.data.born).Seconds() / b.duration)))
+						drawBullet(&b.data, bulletDraw)
+						bulletDraw.Draw(imd)
+					}
 				}
 			}
-		}
 
-		canvas.Clear(colornames.Black)
-		imd.Draw(canvas)
+			canvas.Clear(colornames.Black)
+			imd.Draw(canvas)
 
-		// draw: wards
-		// todo move these batch initializers to run once territory
-		innerWardBatch := imdraw.New(wardInnerPic)
-		outerWardBatch := imdraw.New(wardOuterPic)
-		innerWardBatch.Clear()
-		outerWardBatch.Clear()
-
-		rotInterp := 2 * math.Pi * math.Mod(totalTime, 8.0) / 8
-		currentT := math.Sin(rotInterp)
-		ang := (currentT * 2 * math.Pi) - math.Pi
-
-		canvas.SetComposeMethod(pixel.ComposePlus)
-		if len(player.elements) > 0 {
+			// draw: wards
+			// todo move these batch initializers to run once territory
 			innerWardBatch.Clear()
-			innerWardBatch.SetMatrix(pixel.IM.Rotated(pixel.ZV, ang).Moved(player.origin))
-			el := player.elements[0]
-			innerWardBatch.SetColorMask(elements[el])
-			wardInner.Draw(innerWardBatch, pixel.IM.Scaled(pixel.ZV, 0.6))
-			innerWardBatch.Draw(canvas)
-		}
-
-		if len(player.elements) > 1 {
 			outerWardBatch.Clear()
-			el := player.elements[1]
-			outerWardBatch.SetMatrix(pixel.IM.Rotated(pixel.ZV, ang).Moved(player.origin))
-			outerWardBatch.SetColorMask(elements[el])
-			wardOuter.Draw(outerWardBatch, pixel.IM.Scaled(pixel.ZV, 0.6))
-			outerWardBatch.Draw(canvas)
-		}
 
-		// if len(player.elements) > 2 {
-		// 	innerWardBatch.Clear()
-		// 	el := player.elements[2]
-		// 	innerWardBatch.SetMatrix(pixel.IM.Rotated(pixel.ZV, ang).Moved(player.origin))
-		// 	innerWardBatch.SetColorMask(elements[el])
-		// 	wardInner.Draw(innerWardBatch, pixel.IM.Scaled(pixel.ZV, 0.6))
-		// 	innerWardBatch.Draw(canvas)
-		// }
-		canvas.SetComposeMethod(pixel.ComposeOver)
+			rotInterp := 2 * math.Pi * math.Mod(totalTime, 8.0) / 8
+			currentT := math.Sin(rotInterp)
+			ang := (currentT * 2 * math.Pi) - math.Pi
 
-		if game.data.mode != "story" {
-			mapRect.Draw(canvas)
-		}
+			canvas.SetComposeMethod(pixel.ComposePlus)
+			if len(player.elements) > 0 {
+				innerWardBatch.Clear()
+				innerWardBatch.SetMatrix(pixel.IM.Rotated(pixel.ZV, ang).Moved(player.origin))
+				el := player.elements[0]
+				innerWardBatch.SetColorMask(elements[el])
+				wardInner.Draw(innerWardBatch, pixel.IM.Scaled(pixel.ZV, 0.6))
+				innerWardBatch.Draw(canvas)
+			}
 
-		bloom1.Clear(colornames.Black)
-		bloom2.Clear(colornames.Black)
-		canvas.Draw(bloom1, pixel.IM.Moved(canvas.Bounds().Center()))
-		bloom1.Draw(bloom2, pixel.IM.Moved(canvas.Bounds().Center()))
-		bloom1.Clear(colornames.Black)
-		canvas.Draw(bloom1, pixel.IM.Moved(canvas.Bounds().Center()))
-		bloom2.Draw(bloom1, pixel.IM.Moved(canvas.Bounds().Center()))
-		bloom1.Draw(bloom3, pixel.IM.Moved(canvas.Bounds().Center()))
+			if len(player.elements) > 1 {
+				outerWardBatch.Clear()
+				el := player.elements[1]
+				outerWardBatch.SetMatrix(pixel.IM.Rotated(pixel.ZV, ang).Moved(player.origin))
+				outerWardBatch.SetColorMask(elements[el])
+				wardOuter.Draw(outerWardBatch, pixel.IM.Scaled(pixel.ZV, 0.6))
+				outerWardBatch.Draw(canvas)
+			}
 
-		imd.Clear()
-		if game.state == "playing" {
-			for eID, e := range game.data.entities {
-				if (!e.alive && e.death != time.Time{}) {
-					// fmt.Print("[DrawBounty]")
-					// Draw: bounty
-					e.text.Clear()
-					e.text.Orig = e.origin
-					e.text.Dot = e.origin
+			// if len(player.elements) > 2 {
+			// 	innerWardBatch.Clear()
+			// 	el := player.elements[2]
+			// 	innerWardBatch.SetMatrix(pixel.IM.Rotated(pixel.ZV, ang).Moved(player.origin))
+			// 	innerWardBatch.SetColorMask(elements[el])
+			// 	wardInner.Draw(innerWardBatch, pixel.IM.Scaled(pixel.ZV, 0.6))
+			// 	innerWardBatch.Draw(canvas)
+			// }
+			canvas.SetComposeMethod(pixel.ComposeOver)
 
-					text := fmt.Sprintf("%d", e.bounty*game.data.scoreMultiplier)
-					e.text.Dot.X -= (e.text.BoundsOf(text).W() / 2)
-					fmt.Fprintf(e.text, "%s", text)
-					e.text.Color = colornames.Lightgoldenrodyellow
+			if game.data.mode != "story" {
+				mapRect.Draw(canvas)
+			}
 
-					growth := (0.5 - (float64(e.expiry.Sub(last).Milliseconds()) / 300.0))
-					e.text.Draw(
-						canvas,
-						pixel.IM.Scaled(e.text.Orig, 1.0-growth),
-					)
+			bloom1.Clear(colornames.Black)
+			bloom2.Clear(colornames.Black)
+			canvas.Draw(bloom1, pixel.IM.Moved(canvas.Bounds().Center()))
+			bloom1.Draw(bloom2, pixel.IM.Moved(canvas.Bounds().Center()))
+			bloom1.Clear(colornames.Black)
+			canvas.Draw(bloom1, pixel.IM.Moved(canvas.Bounds().Center()))
+			bloom2.Draw(bloom1, pixel.IM.Moved(canvas.Bounds().Center()))
+			bloom1.Draw(bloom3, pixel.IM.Moved(canvas.Bounds().Center()))
+
+			imd.Clear()
+			if game.state == "playing" {
+				for eID, e := range game.data.entities {
+					if (!e.alive && e.death != time.Time{}) {
+						// fmt.Print("[DrawBounty]")
+						// Draw: bounty
+						e.text.Clear()
+						e.text.Orig = e.origin
+						e.text.Dot = e.origin
+
+						text := fmt.Sprintf("%d", e.bounty*game.data.scoreMultiplier)
+						e.text.Dot.X -= (e.text.BoundsOf(text).W() / 2)
+						fmt.Fprintf(e.text, "%s", text)
+						e.text.Color = colornames.Lightgoldenrodyellow
+
+						growth := (0.5 - (float64(e.expiry.Sub(last).Milliseconds()) / 300.0))
+						e.text.Draw(
+							canvas,
+							pixel.IM.Scaled(e.text.Orig, 1.0-growth),
+						)
+					}
+
+					if debug {
+						e.DrawDebug(fmt.Sprintf("%d", eID), imd, canvas)
+					}
 				}
 
 				if debug {
-					e.DrawDebug(fmt.Sprintf("%d", eID), imd, canvas)
+					player.DrawDebug("player", imd, canvas)
+					for _, debugLog := range debugInfos {
+						if debugLog != (debugInfo{}) {
+							imd.Color = colornames.Whitesmoke
+							imd.Push(debugLog.p1, debugLog.p2)
+							imd.Line(2)
+						}
+					}
+					imd.Draw(canvas)
 				}
 			}
 
-			if debug {
-				player.DrawDebug("player", imd, canvas)
-				for _, debugLog := range debugInfos {
-					if debugLog != (debugInfo{}) {
-						imd.Color = colornames.Whitesmoke
-						imd.Push(debugLog.p1, debugLog.p2)
-						imd.Line(2)
+			// stretch the canvas to the window
+			win.Clear(colornames.Black)
+			win.SetMatrix(pixel.IM.ScaledXY(pixel.ZV,
+				pixel.V(
+					win.Bounds().W()/bloom2.Bounds().W(),
+					win.Bounds().H()/bloom2.Bounds().H(),
+				),
+			).Moved(win.Bounds().Center()))
+
+			win.SetComposeMethod(pixel.ComposePlus)
+			// bloom2.Draw(win, pixel.IM.Moved(bloom2.Bounds().Center()))
+			bloom3.Draw(win, pixel.IM.Moved(bloom2.Bounds().Center()))
+			canvas.Draw(win, pixel.IM.Moved(canvas.Bounds().Center()))
+
+			imd.Clear()
+			imd.Color = colornames.Orange
+			imd.SetColorMask(pixel.Alpha(1.0))
+			uiCanvas.Clear(colornames.Black)
+			if game.state == "playing" {
+				scoreTxt.Clear()
+				txt := "Score: %d\n"
+				scoreTxt.Dot.X -= (scoreTxt.BoundsOf(txt).W() / 2)
+				fmt.Fprintf(scoreTxt, txt, game.data.score)
+				txt = "X%d\n"
+				scoreTxt.Dot.X -= (scoreTxt.BoundsOf(txt).W() / 2)
+				fmt.Fprintf(scoreTxt, txt, game.data.scoreMultiplier)
+
+				// if debug {
+				txt = "Debugging: On"
+				fmt.Fprintln(scoreTxt, txt)
+
+				txt = "Timescale: %.2f\n"
+				fmt.Fprintf(scoreTxt, txt, game.data.timescale)
+
+				txt = "Entities: %d\n"
+				fmt.Fprintf(scoreTxt, txt, len(game.data.entities))
+
+				txt = "Entities Cap: %d\n"
+				fmt.Fprintf(scoreTxt, txt, cap(game.data.entities))
+
+				bufferedSpawns := 0
+				for _, ent := range game.data.newEntities {
+					if ent.entityType != "" {
+						bufferedSpawns++
 					}
 				}
-				imd.Draw(canvas)
-			}
-		}
 
-		// stretch the canvas to the window
-		win.Clear(colornames.Black)
-		win.SetMatrix(pixel.IM.ScaledXY(pixel.ZV,
-			pixel.V(
-				win.Bounds().W()/bloom2.Bounds().W(),
-				win.Bounds().H()/bloom2.Bounds().H(),
-			),
-		).Moved(win.Bounds().Center()))
+				// txt = "Buffered Living Entities: %d\n"
+				// fmt.Fprintf(scoreTxt, txt, bufferedSpawns)
 
-		win.SetComposeMethod(pixel.ComposePlus)
-		// bloom2.Draw(win, pixel.IM.Moved(bloom2.Bounds().Center()))
-		bloom3.Draw(win, pixel.IM.Moved(bloom2.Bounds().Center()))
-		canvas.Draw(win, pixel.IM.Moved(canvas.Bounds().Center()))
+				// txt = "Buffered Entities Cap: %d\n"
+				// fmt.Fprintf(scoreTxt, txt, cap(game.data.newEntities))
 
-		imd.Clear()
-		imd.Color = colornames.Orange
-		imd.SetColorMask(pixel.Alpha(1.0))
-		uiCanvas.Clear(colornames.Black)
-		if game.state == "playing" {
-			scoreTxt.Clear()
-			txt := "Score: %d\n"
-			scoreTxt.Dot.X -= (scoreTxt.BoundsOf(txt).W() / 2)
-			fmt.Fprintf(scoreTxt, txt, game.data.score)
-			txt = "X%d\n"
-			scoreTxt.Dot.X -= (scoreTxt.BoundsOf(txt).W() / 2)
-			fmt.Fprintf(scoreTxt, txt, game.data.scoreMultiplier)
-
-			// if debug {
-			txt = "Debugging: On"
-			fmt.Fprintln(scoreTxt, txt)
-
-			txt = "Timescale: %.2f\n"
-			fmt.Fprintf(scoreTxt, txt, game.data.timescale)
-
-			txt = "Entities: %d\n"
-			fmt.Fprintf(scoreTxt, txt, len(game.data.entities))
-
-			txt = "Particles: %d\n"
-			fmt.Fprintf(scoreTxt, txt, len(game.data.particles))
-
-			txt = "Kills: %d\n"
-			fmt.Fprintf(scoreTxt, txt, game.data.kills)
-
-			txt = "Notoriety: %f\n"
-			fmt.Fprintf(scoreTxt, txt, game.data.notoriety)
-
-			txt = "spawnCount: %d\n"
-			fmt.Fprintf(scoreTxt, txt, game.data.spawnCount)
-
-			txt = "spawnFreq: %f\n"
-			fmt.Fprintf(scoreTxt, txt, game.data.ambientSpawnFreq)
-
-			txt = "waveFreq: %f\n"
-			fmt.Fprintf(scoreTxt, txt, game.data.waveFreq)
-
-			txt = "multiplierReward: %d kills required\n"
-			fmt.Fprintf(scoreTxt, txt, game.data.multiplierReward-game.data.killsSinceBorn)
-			// }
-
-			scoreTxt.Draw(
-				win,
-				pixel.IM.Scaled(scoreTxt.Orig, 1),
-			)
-
-			livesTxt.Clear()
-			txt = "Lives: %d\n"
-			livesTxt.Dot.X -= (livesTxt.BoundsOf(txt).W() / 2)
-			fmt.Fprintf(livesTxt, txt, game.data.lives)
-			txt = "Bombs: %d\n"
-			livesTxt.Dot.X -= (livesTxt.BoundsOf(txt).W() / 2)
-			fmt.Fprintf(livesTxt, txt, game.data.bombs)
-
-			// draw: UI
-			uiOrigin := pixel.V(-width/2+128, -height/2+192)
-
-			// WASD
-			imd.Color = colornames.Black
-			imd.Push(uiOrigin.Add(pixel.V(50, 0)))
-			imd.Circle(20.0, 0)
-
-			imd.Push(uiOrigin.Add(pixel.V(10, -50)))
-			imd.Circle(20.0, 0)
-
-			imd.Push(uiOrigin.Add(pixel.V(60, -50)))
-			imd.Circle(20.0, 0)
-
-			imd.Push(uiOrigin.Add(pixel.V(110, -50)))
-			imd.Circle(20.0, 0)
-
-			imd.Color = elementWaterColor
-			imd.Push(uiOrigin)
-			imd.Circle(20.0, 0)
-
-			imd.Color = elementChaosColor
-			imd.Push(uiOrigin.Add(pixel.V(100, 0)))
-			imd.Circle(20.0, 0)
-
-			imd.Color = elementSpiritColor
-			imd.Push(uiOrigin.Add(pixel.V(150, 0)))
-			imd.Circle(20.0, 0)
-
-			imd.Color = elementFireColor
-			imd.Push(uiOrigin.Add(pixel.V(160, -50)))
-			imd.Circle(20.0, 0)
-
-			imd.Color = elementLightningColor
-			imd.Push(uiOrigin.Add(pixel.V(20, -100)))
-			imd.Circle(20.0, 0)
-
-			imd.Color = elementWindColor
-			imd.Push(uiOrigin.Add(pixel.V(70, -100)))
-			imd.Circle(20.0, 0)
-
-			imd.Color = elementLifeColor
-			imd.Push(uiOrigin.Add(pixel.V(120, -100)))
-			imd.Circle(20.0, 0)
-			// imd.Color = elementFireColor
-			// imd.Push(uiOrigin.Add(pixel.V(160, -50)))
-			// imd.Circle(20.0, 0)
-
-			livesTxt.Draw(
-				win,
-				pixel.IM.Scaled(livesTxt.Orig, 1),
-			)
-		} else if game.state == "paused" {
-			titleTxt.Clear()
-			titleTxt.Orig = pixel.V(0.0, 128.0)
-			titleTxt.Dot.X -= titleTxt.BoundsOf(gameTitle).W() / 2
-			fmt.Fprintln(titleTxt, gameTitle)
-			titleTxt.Draw(
-				win,
-				pixel.IM.Scaled(
-					titleTxt.Orig,
-					2,
-				),
-			)
-			imd.Push(
-				titleTxt.Orig.Add(pixel.V(-128, -18.0)),
-				titleTxt.Orig.Add(pixel.V(128, -18.0)),
-			)
-			imd.Line(1.0)
-
-			centeredTxt.Orig = pixel.V(-96, 64)
-			centeredTxt.Clear()
-			for _, item := range game.menu.options {
-				if item == game.menu.options[game.menu.selection] {
-					imd.Push(centeredTxt.Dot.Add(pixel.V(-12.0, (centeredTxt.LineHeight/2.0)-4)))
-					imd.Circle(2.0, 4.0)
+				activeParticles := 0
+				for _, p := range game.data.particles {
+					if p != (particle{}) {
+						activeParticles++
+					}
 				}
-				fmt.Fprintln(centeredTxt, item)
-			}
 
-			// centeredTxt.Color = color.RGBA64{255, 255, 255, 255}
-			centeredTxt.Draw(
-				win,
-				pixel.IM.Scaled(centeredTxt.Orig, 1),
-			)
-		} else if game.state == "start_screen" {
-			titleTxt.Clear()
-			line := gameTitle
+				txt = "Particles: %d\n"
+				fmt.Fprintf(scoreTxt, txt, activeParticles)
+				txt = "Particles Cap: %d\n"
+				fmt.Fprintf(scoreTxt, txt, cap(game.data.particles))
 
-			titleTxt.Orig = pixel.Lerp(
-				pixel.V(0.0, -400), pixel.V(0.0, 128.0), totalTime/6.0,
-			)
-			titleTxt.Dot.X -= (titleTxt.BoundsOf(line).W() / 2)
-			fmt.Fprintln(titleTxt, line)
-			if totalTime > 6.0 {
-				game.state = "main_menu"
-			}
-			titleTxt.Draw(
-				win,
-				pixel.IM.Scaled(
-					titleTxt.Orig,
-					5,
-				),
-			)
-		} else if game.state == "main_menu" {
-			titleTxt.Clear()
-			titleTxt.Orig = pixel.V(0.0, 128.0)
-			titleTxt.Dot.X -= titleTxt.BoundsOf(gameTitle).W() / 2
-			fmt.Fprintln(titleTxt, gameTitle)
-			titleTxt.Draw(
-				uiCanvas,
-				pixel.IM.Scaled(
-					titleTxt.Orig,
-					2,
-				),
-			)
-			imd.Push(
-				titleTxt.Orig.Add(pixel.V(-128, -18.0)),
-				titleTxt.Orig.Add(pixel.V(128, -18.0)),
-			)
-			imd.Line(1.0)
-
-			centeredTxt.Orig = pixel.V(-112, 64)
-			centeredTxt.Clear()
-			for _, item := range game.menu.options {
-				if sliceextra.Contains(implementedMenuItems, item) {
-					centeredTxt.Color = colornames.White
-				} else {
-					centeredTxt.Color = colornames.Grey
+				bufferedParticles := 0
+				for _, particle := range game.data.newParticles {
+					if (particle.origin != pixel.Vec{}) {
+						bufferedParticles++
+					}
 				}
-				if item == game.menu.options[game.menu.selection] {
-					centeredTxt.Color = colornames.Deepskyblue
-					imd.Push(
-						centeredTxt.Dot.Add(
-							pixel.V(
-								-8.0,
-								(centeredTxt.LineHeight/2.0)-4.0,
+
+				txt = "Buffered Particles: %d\n"
+				fmt.Fprintf(scoreTxt, txt, bufferedParticles)
+
+				txt = "Bullets: %d\n"
+				fmt.Fprintf(scoreTxt, txt, len(game.data.bullets))
+				txt = "Bullets Cap: %d\n"
+				fmt.Fprintf(scoreTxt, txt, cap(game.data.bullets))
+
+				txt = "Kills: %d\n"
+				fmt.Fprintf(scoreTxt, txt, game.data.kills)
+
+				txt = "Notoriety: %f\n"
+				fmt.Fprintf(scoreTxt, txt, game.data.notoriety)
+
+				txt = "spawnCount: %d\n"
+				fmt.Fprintf(scoreTxt, txt, game.data.spawnCount)
+
+				txt = "spawnFreq: %f\n"
+				fmt.Fprintf(scoreTxt, txt, game.data.ambientSpawnFreq)
+
+				txt = "waveFreq: %f\n"
+				fmt.Fprintf(scoreTxt, txt, game.data.waveFreq)
+
+				txt = "multiplierReward: %d kills required\n"
+				fmt.Fprintf(scoreTxt, txt, game.data.multiplierReward-game.data.killsSinceBorn)
+				// }
+
+				scoreTxt.Draw(
+					win,
+					pixel.IM.Scaled(scoreTxt.Orig, 1),
+				)
+
+				livesTxt.Clear()
+				txt = "Lives: %d\n"
+				livesTxt.Dot.X -= (livesTxt.BoundsOf(txt).W() / 2)
+				fmt.Fprintf(livesTxt, txt, game.data.lives)
+				txt = "Bombs: %d\n"
+				livesTxt.Dot.X -= (livesTxt.BoundsOf(txt).W() / 2)
+				fmt.Fprintf(livesTxt, txt, game.data.bombs)
+
+				// draw: UI
+				uiOrigin := pixel.V(-width/2+128, -height/2+192)
+
+				// WASD
+				imd.Color = colornames.Black
+				imd.Push(uiOrigin.Add(pixel.V(50, 0)))
+				imd.Circle(20.0, 0)
+
+				imd.Push(uiOrigin.Add(pixel.V(10, -50)))
+				imd.Circle(20.0, 0)
+
+				imd.Push(uiOrigin.Add(pixel.V(60, -50)))
+				imd.Circle(20.0, 0)
+
+				imd.Push(uiOrigin.Add(pixel.V(110, -50)))
+				imd.Circle(20.0, 0)
+
+				imd.Color = elementWaterColor
+				imd.Push(uiOrigin)
+				imd.Circle(20.0, 0)
+
+				imd.Color = elementChaosColor
+				imd.Push(uiOrigin.Add(pixel.V(100, 0)))
+				imd.Circle(20.0, 0)
+
+				imd.Color = elementSpiritColor
+				imd.Push(uiOrigin.Add(pixel.V(150, 0)))
+				imd.Circle(20.0, 0)
+
+				imd.Color = elementFireColor
+				imd.Push(uiOrigin.Add(pixel.V(160, -50)))
+				imd.Circle(20.0, 0)
+
+				imd.Color = elementLightningColor
+				imd.Push(uiOrigin.Add(pixel.V(20, -100)))
+				imd.Circle(20.0, 0)
+
+				imd.Color = elementWindColor
+				imd.Push(uiOrigin.Add(pixel.V(70, -100)))
+				imd.Circle(20.0, 0)
+
+				imd.Color = elementLifeColor
+				imd.Push(uiOrigin.Add(pixel.V(120, -100)))
+				imd.Circle(20.0, 0)
+				// imd.Color = elementFireColor
+				// imd.Push(uiOrigin.Add(pixel.V(160, -50)))
+				// imd.Circle(20.0, 0)
+
+				livesTxt.Draw(
+					win,
+					pixel.IM.Scaled(livesTxt.Orig, 1),
+				)
+			} else if game.state == "paused" {
+				titleTxt.Clear()
+				titleTxt.Orig = pixel.V(0.0, 128.0)
+				titleTxt.Dot.X -= titleTxt.BoundsOf(gameTitle).W() / 2
+				fmt.Fprintln(titleTxt, gameTitle)
+				titleTxt.Draw(
+					win,
+					pixel.IM.Scaled(
+						titleTxt.Orig,
+						2,
+					),
+				)
+				imd.Push(
+					titleTxt.Orig.Add(pixel.V(-128, -18.0)),
+					titleTxt.Orig.Add(pixel.V(128, -18.0)),
+				)
+				imd.Line(1.0)
+
+				centeredTxt.Orig = pixel.V(-96, 64)
+				centeredTxt.Clear()
+				for _, item := range game.menu.options {
+					if item == game.menu.options[game.menu.selection] {
+						imd.Push(centeredTxt.Dot.Add(pixel.V(-12.0, (centeredTxt.LineHeight/2.0)-4)))
+						imd.Circle(2.0, 4.0)
+					}
+					fmt.Fprintln(centeredTxt, item)
+				}
+
+				// centeredTxt.Color = color.RGBA64{255, 255, 255, 255}
+				centeredTxt.Draw(
+					win,
+					pixel.IM.Scaled(centeredTxt.Orig, 1),
+				)
+			} else if game.state == "start_screen" {
+				titleTxt.Clear()
+				line := gameTitle
+
+				titleTxt.Orig = pixel.Lerp(
+					pixel.V(0.0, -400), pixel.V(0.0, 128.0), totalTime/6.0,
+				)
+				titleTxt.Dot.X -= (titleTxt.BoundsOf(line).W() / 2)
+				fmt.Fprintln(titleTxt, line)
+				if totalTime > 6.0 {
+					game.state = "main_menu"
+				}
+				titleTxt.Draw(
+					win,
+					pixel.IM.Scaled(
+						titleTxt.Orig,
+						5,
+					),
+				)
+			} else if game.state == "main_menu" {
+				titleTxt.Clear()
+				titleTxt.Orig = pixel.V(0.0, 128.0)
+				titleTxt.Dot.X -= titleTxt.BoundsOf(gameTitle).W() / 2
+				fmt.Fprintln(titleTxt, gameTitle)
+				titleTxt.Draw(
+					uiCanvas,
+					pixel.IM.Scaled(
+						titleTxt.Orig,
+						2,
+					),
+				)
+				imd.Push(
+					titleTxt.Orig.Add(pixel.V(-128, -18.0)),
+					titleTxt.Orig.Add(pixel.V(128, -18.0)),
+				)
+				imd.Line(1.0)
+
+				centeredTxt.Orig = pixel.V(-112, 64)
+				centeredTxt.Clear()
+				for _, item := range game.menu.options {
+					if sliceextra.Contains(implementedMenuItems, item) {
+						centeredTxt.Color = colornames.White
+					} else {
+						centeredTxt.Color = colornames.Grey
+					}
+					if item == game.menu.options[game.menu.selection] {
+						centeredTxt.Color = colornames.Deepskyblue
+						imd.Push(
+							centeredTxt.Dot.Add(
+								pixel.V(
+									-8.0,
+									(centeredTxt.LineHeight/2.0)-4.0,
+								),
 							),
-						),
-					)
-					imd.Circle(2.0, 4.0)
+						)
+						imd.Circle(2.0, 4.0)
+					}
+					fmt.Fprintln(centeredTxt, item)
 				}
-				fmt.Fprintln(centeredTxt, item)
+
+				// centeredTxt.Color = color.RGBA64{255, 255, 255, 255}
+				centeredTxt.Draw(
+					uiCanvas,
+					pixel.IM.Scaled(centeredTxt.Orig, 1),
+				)
+			} else if game.state == "story_mode" {
+				// centeredTxt.Orig = pixel.V(-112, 64)
+				// centeredTxt.Clear()
+				// for _, page := range chapter1.pages {
+
+				// 		imd.Push(centeredTxt.Dot.Add(pixel.V(-8.0, (centeredTxt.LineHeight/2.0)-4.0)))
+				// 		imd.Circle(2.0, 4.0)
+				// 	fmt.Fprintln(centeredTxt, item)
+				// }
+
+				// // centeredTxt.Color = color.RGBA64{255, 255, 255, 255}
+				// centeredTxt.Draw(
+				// 	uiCanvas,
+				// 	pixel.IM.Scaled(centeredTxt.Orig, 1),
+				// )
+			} else if game.state == "game_over" {
+				titleTxt.Clear()
+				titleTxt.Orig = pixel.V(0.0, 128.0)
+				titleTxt.Dot.X -= titleTxt.BoundsOf("Game Over").W() / 2
+				fmt.Fprintln(titleTxt, "Game Over")
+				titleTxt.Draw(
+					uiCanvas,
+					pixel.IM.Scaled(
+						titleTxt.Orig,
+						2,
+					),
+				)
+				imd.Push(
+					titleTxt.Orig.Add(pixel.V(-128, -18.0)),
+					titleTxt.Orig.Add(pixel.V(128, -18.0)),
+				)
+				imd.Line(1.0)
+
+				gameOverTxt.Draw(
+					win,
+					pixel.IM.Scaled(
+						gameOverTxt.Orig,
+						1,
+					),
+				)
 			}
-
-			// centeredTxt.Color = color.RGBA64{255, 255, 255, 255}
-			centeredTxt.Draw(
-				uiCanvas,
-				pixel.IM.Scaled(centeredTxt.Orig, 1),
-			)
-		} else if game.state == "story_mode" {
-			// centeredTxt.Orig = pixel.V(-112, 64)
-			// centeredTxt.Clear()
-			// for _, page := range chapter1.pages {
-
-			// 		imd.Push(centeredTxt.Dot.Add(pixel.V(-8.0, (centeredTxt.LineHeight/2.0)-4.0)))
-			// 		imd.Circle(2.0, 4.0)
-			// 	fmt.Fprintln(centeredTxt, item)
-			// }
-
-			// // centeredTxt.Color = color.RGBA64{255, 255, 255, 255}
-			// centeredTxt.Draw(
-			// 	uiCanvas,
-			// 	pixel.IM.Scaled(centeredTxt.Orig, 1),
-			// )
-		} else if game.state == "game_over" {
-			titleTxt.Clear()
-			titleTxt.Orig = pixel.V(0.0, 128.0)
-			titleTxt.Dot.X -= titleTxt.BoundsOf("Game Over").W() / 2
-			fmt.Fprintln(titleTxt, "Game Over")
-			titleTxt.Draw(
-				uiCanvas,
-				pixel.IM.Scaled(
-					titleTxt.Orig,
-					2,
-				),
-			)
-			imd.Push(
-				titleTxt.Orig.Add(pixel.V(-128, -18.0)),
-				titleTxt.Orig.Add(pixel.V(128, -18.0)),
-			)
-			imd.Line(1.0)
-
-			gameOverTxt.Draw(
-				win,
-				pixel.IM.Scaled(
-					gameOverTxt.Orig,
-					1,
-				),
-			)
+			imd.Draw(uiCanvas)
+			uiCanvas.Draw(win, pixel.IM.Moved(uiCanvas.Bounds().Center()))
 		}
-		imd.Draw(uiCanvas)
-		uiCanvas.Draw(win, pixel.IM.Moved(uiCanvas.Bounds().Center()))
 
 		win.Update()
 	}
 }
 
+// To read about how to use these profiles,
+// https://blog.golang.org/pprof
+var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
+var memprofile = flag.String("memprofile", "", "write memory profile to this file")
+
 func main() {
+	flag.Parse()
+	if *cpuprofile != "" {
+		f, err := os.Create(*cpuprofile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
+	}
+
 	pixelgl.Run(run)
+
+	if *memprofile != "" {
+		f, err := os.Create(*memprofile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		pprof.WriteHeapProfile(f)
+		f.Close()
+		return
+	}
 }

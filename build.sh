@@ -1,2 +1,2 @@
 #! /usr/bin/env bash
-go run main.go sound.go
+go run main.go sound.go > log.txt
