@@ -30,7 +30,21 @@ import (
 	"golang.org/x/image/font/basicfont"
 )
 
-const maxParticles = 1600
+// Config
+type configuration struct {
+	screenWidth  float64
+	screenHeight float64
+	fullscreen   bool
+}
+
+// Pull this stuff out into a config file.
+var config = configuration{
+	1024.0,
+	768.0,
+	false,
+}
+
+const maxParticles = 5000
 const worldWidth = 1700.0
 const worldHeight = 1080.0
 const gameTitle = "Starship Kepler"
@@ -1247,6 +1261,8 @@ type gamedata struct {
 	lastBomb          time.Time
 	lastWave          time.Time
 	lastWeaponUpgrade time.Time
+
+	console bool
 }
 
 type game struct {
@@ -1373,6 +1389,8 @@ func NewGameData() *gamedata {
 	gameData.lastWave = time.Time{}
 	gameData.gameStart = time.Now()
 	gameData.timescale = 1.0
+
+	gameData.console = false
 
 	return gameData
 }
@@ -1503,62 +1521,55 @@ func (data *gamedata) AmbientSpawnFreq() float64 {
 
 func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime float64, player *entityData) {
 	// ambient spawns
-	// if !debug && last.Sub(game.data.lastSpawn).Seconds() > game.data.AmbientSpawnFreq() && game.data.spawning {
-	// 	// spawn
-	// 	spawns := make([]entityData, 0, game.data.spawnCount)
-	// 	for i := 0; i < game.data.spawnCount; i++ {
-	// 		pos := pixel.V(
-	// 			float64(rand.Intn(worldWidth)-worldWidth/2),
-	// 			float64(rand.Intn(worldHeight)-worldHeight/2),
-	// 		)
-	// 		// to regulate distance from player
-	// 		for pos.Sub(player.origin).Len() < 350 {
-	// 			pos = pixel.V(
-	// 				float64(rand.Intn(worldWidth)-worldWidth/2),
-	// 				float64(rand.Intn(worldHeight)-worldHeight/2),
-	// 			)
-	// 		}
+	if !debug && last.Sub(game.data.lastSpawn).Seconds() > game.data.AmbientSpawnFreq() && game.data.spawning {
+		// spawn
+		spawns := make([]entityData, 0, game.data.spawnCount)
+		for i := 0; i < game.data.spawnCount; i++ {
+			pos := pixel.V(
+				float64(rand.Intn(worldWidth)-worldWidth/2),
+				float64(rand.Intn(worldHeight)-worldHeight/2),
+			)
+			// to regulate distance from player
+			for pos.Sub(player.origin).Len() < 450 {
+				pos = pixel.V(
+					float64(rand.Intn(worldWidth)-worldWidth/2),
+					float64(rand.Intn(worldHeight)-worldHeight/2),
+				)
+			}
 
-	// 		var enemy entityData
-	// 		notoriety := math.Min(0.31, game.data.notoriety)
-	// 		r := rand.Float64() * (0.2 + notoriety)
-	// 		if r <= 0.1 {
-	// 			enemy = *NewWanderer(pos.X, pos.Y)
-	// 		} else if r <= 0.4 {
-	// 			enemy = *NewFollower(pos.X, pos.Y)
-	// 		} else if r <= 0.43 {
-	// 			enemy = *NewPinkSquare(pos.X, pos.Y)
-	// 		} else if r <= 0.49 {
-	// 			enemy = *NewDodger(pos.X, pos.Y)
-	// 		} else if r <= 0.5 {
-	// 			enemy = *NewBlackHole(pos.X, pos.Y)
-	// 		} else {
-	// 			enemy = *NewSnek(pos.X, pos.Y)
-	// 		}
+			var enemy entityData
+			notoriety := math.Min(0.31, game.data.notoriety)
+			r := rand.Float64() * (0.2 + notoriety)
+			if r <= 0.1 {
+				enemy = *NewWanderer(pos.X, pos.Y)
+			} else if r <= 0.4 {
+				enemy = *NewFollower(pos.X, pos.Y)
+			} else if r <= 0.43 {
+				enemy = *NewPinkSquare(pos.X, pos.Y)
+			} else if r <= 0.49 {
+				enemy = *NewDodger(pos.X, pos.Y)
+			} else if r <= 0.5 {
+				enemy = *NewBlackHole(pos.X, pos.Y)
+			} else {
+				enemy = *NewSnek(pos.X, pos.Y)
+			}
 
-	// 		spawns = append(spawns, enemy)
-	// 	}
+			spawns = append(spawns, enemy)
+		}
 
-	// 	PlaySpawnSounds(spawns)
-	// 	game.data.entities = append(game.data.entities, spawns...)
-	// 	game.data.spawns += len(spawns)
-	// 	game.data.lastSpawn = time.Now()
+		PlaySpawnSounds(spawns)
+		game.data.entities = append(game.data.entities, spawns...)
+		game.data.spawns += len(spawns)
+		game.data.lastSpawn = time.Now()
 
-	// 	game.data.spawnCount = 1
-	// 	n := int(math.Min(float64(game.data.spawns/50), 4))
-	// 	if n > game.data.spawnCount {
-	// 		game.data.spawnCount = n
-	// 	}
+		game.data.spawnCount = 1
+		n := int(math.Min(float64(game.data.spawns/50), 4))
+		if n > game.data.spawnCount {
+			game.data.spawnCount = n
+		}
+	}
 
 	game.data.notoriety = float64(game.data.kills) / 100.0
-	game.data.ambientSpawnFreq = math.Max(
-		1.0,
-		3-((float64(game.data.spawns)/30.0)*0.5),
-	)
-	game.data.waveFreq = math.Max(
-		5.0, 30.0-(1.4*game.data.notoriety),
-	)
-	// }
 
 	livingEntities := 0
 	for _, e := range game.data.entities {
@@ -1568,12 +1579,22 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 	}
 
 	// wave management
-	waveDead := livingEntities == 0 && game.data.pendingSpawns == 0
+	waveDead := livingEntities == 0 && (game.data.pendingSpawns == 0 && !game.data.spawning)
 	firstWave := game.data.lastWave == (time.Time{}) && totalTime >= 2
 	subsequentWave := (game.data.lastWave != (time.Time{}) &&
 		(last.Sub(game.data.lastWave).Seconds() >= game.data.waveFreq) || waveDead)
 
 	if !debug && (firstWave || subsequentWave) {
+		// New wave, so re-assess wave frequency etc in case it was set by a custom wave
+		game.data.ambientSpawnFreq = math.Max(
+			1.0,
+			3-((float64(game.data.spawns)/30.0)*0.5),
+		)
+		game.data.waveFreq = math.Max(
+			5.0, 30.0-(3*game.data.notoriety),
+		)
+
+		game.data.spawning = false
 		corners := [4]pixel.Vec{
 			pixel.V(-(worldWidth/2)+80, -(worldHeight/2)+80),
 			pixel.V(-(worldWidth/2)+80, (worldHeight/2)-80),
@@ -1582,12 +1603,16 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 		}
 		// one-off landing party
 		fmt.Printf("[LandingPartySpawn] %s\n", time.Now().String())
-		r := rand.Float64() * (0.4 + math.Min(game.data.notoriety, 0.6))
+		r := rand.Float64() * (0.2 + math.Min(game.data.notoriety, 0.8))
 		spawns := make([]entityData, 0, game.data.spawnCount)
 
 		// landing party spawn
 		{
 			if r <= 0.1 {
+				// if we roll 0.1, just do a wave of ambient spawning
+				game.data.waveFreq = 10
+				game.data.spawning = true
+			} else if r <= 0.25 {
 				count := 2 + rand.Intn(4)
 				for i := 0; i < count; i++ {
 					p := corners[i%4]
@@ -1597,7 +1622,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 					)
 					spawns = append(spawns, *enemy)
 				}
-			} else if r <= 0.2 {
+			} else if r <= 0.28 {
 				count := 2 + rand.Intn(4)
 				for i := 0; i < count; i++ {
 					p := corners[i%4]
@@ -1607,7 +1632,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 					)
 					spawns = append(spawns, *enemy)
 				}
-			} else if r <= 0.25 {
+			} else if r <= 0.35 {
 				count := 8 + rand.Intn(4)
 				for i := 0; i < count; i++ {
 					p := corners[i%4]
@@ -2118,8 +2143,9 @@ func init() {
 // resist the urge to refactor. just write a game, don't worry about clean code.
 func run() {
 	monitor := pixelgl.PrimaryMonitor()
-	width, height := monitor.Size()
-	// width, height := 1024.0, 768.0
+	width := config.screenWidth
+	height := config.screenHeight
+
 	if width > 1920 {
 		width = 1920
 	}
@@ -2129,11 +2155,13 @@ func run() {
 	cfg := pixelgl.WindowConfig{
 		Title:  "Starship Kepler",
 		Bounds: pixel.R(0, 0, width, height),
-		// Bounds: pixel.R(0, 0, 1024, 768),
-		Monitor:   monitor,
-		Maximized: false,
-		VSync:     true,
+		VSync:  true,
 	}
+
+	if config.fullscreen {
+		cfg.Monitor = monitor
+	}
+
 	debug := false
 	if debug {
 		cfg.Bounds = pixel.R(0, 0, 1024, 768)
@@ -2249,6 +2277,7 @@ func run() {
 	game := NewGame()
 	camPos := pixel.ZV
 	imd := imdraw.New(nil)
+	uiDraw := imdraw.New(nil)
 	bulletDraw := imdraw.New(nil)
 	particleDraw := imdraw.New(nil)
 	tmpTarget := imdraw.New(nil)
@@ -2281,6 +2310,7 @@ func run() {
 		last = time.Now()
 
 		imd.Reset()
+		uiDraw.Reset()
 		bulletDraw.Reset()
 		particleDraw.Reset()
 		tmpTarget.Reset()
@@ -2298,7 +2328,7 @@ func run() {
 
 			lastMemCheck = last
 
-			runtime.GC()
+			// runtime.GC()
 		}
 
 		if debug {
@@ -2473,11 +2503,16 @@ func run() {
 				game.menu = NewPauseMenu()
 			}
 
+			if win.JustPressed(pixelgl.KeyGraveAccent) {
+				game.data.console = !game.data.console
+			}
+
 			// player controls
-			{
-				if win.JustPressed(pixelgl.KeyGraveAccent) {
-					debug = !debug
+			if game.data.console {
+				if win.JustPressed(pixelgl.KeyEnter) {
+					game.data.console = false
 				}
+			} else {
 				if win.JustPressed(pixelgl.KeyMinus) {
 					game.data.timescale *= 0.5
 					if game.data.timescale < 0.1 {
@@ -3539,6 +3574,8 @@ func run() {
 		// draw_
 		{
 			imd.Clear()
+			uiDraw.Clear()
+			uiDraw.Color = colornames.Black
 
 			if game.state == "paused" || game.data.mode == "menu_game" || game.state == "game_over" {
 				a := (math.Min(totalTime, 4) / 8.0)
@@ -3546,6 +3583,19 @@ func run() {
 				uiCanvas.SetColorMask(pixel.Alpha(math.Min(1.0, a*4)))
 			} else {
 				canvas.SetColorMask(pixel.Alpha(1.0))
+			}
+
+			if game.data.console {
+				// draw: console
+				w := win.Bounds().W()
+				h := win.Bounds().H()
+				uiDraw.Push(
+					pixel.V(-w/2.0, h/2.0),
+					pixel.V(-w/2.0, (h/2.0)-32),
+					pixel.V(w/2.0, h/2.0),
+					pixel.V(w/2.0, (h/2.0)-32),
+				)
+				uiDraw.Rectangle(0.0)
 			}
 
 			// Draw: grid effect
@@ -4274,7 +4324,9 @@ func run() {
 					),
 				)
 			}
-			imd.Draw(uiCanvas)
+
+			uiDraw.Draw(uiCanvas)
+			imd.Draw(uiCanvas) // refactor away from using this draw target for UI concerns
 			uiCanvas.Draw(win, pixel.IM.Moved(uiCanvas.Bounds().Center()))
 		}
 

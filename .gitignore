@@ -1,0 +1,5 @@
+*.prof1
+*.prof
+
+*.exe
+log.txt
