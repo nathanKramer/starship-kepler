@@ -1,6 +1,7 @@
-package main
+package starshipkepler
 
 import (
+	"fmt"
 	"math"
 	"math/rand"
 	"runtime"
@@ -14,7 +15,24 @@ import (
 	"golang.org/x/image/colornames"
 )
 
-func updateGame(win *pixelgl.Window, game *game, ui *uiContext) {
+func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
+
+	if game.lastFrame.Sub(game.lastMemCheck).Seconds() > 5.0 {
+		PrintMemUsage()
+		fmt.Printf("Entities\tlen: %d\tcap: %d\n", len(game.data.entities), cap(game.data.entities))
+		fmt.Printf("New Entities\tlen: %d\tcap: %d\n\n", len(game.data.newEntities), cap(game.data.newEntities))
+
+		fmt.Printf("Bullets\tlen: %d\tcap: %d\n", len(game.data.bullets), cap(game.data.bullets))
+		fmt.Printf("New Bullets\tlen: %d\tcap: %d\n\n", len(game.data.newBullets), cap(game.data.newBullets))
+
+		fmt.Printf("Particles\tlen: %d\tcap: %d\n", len(game.data.particles), cap(game.data.particles))
+		fmt.Printf("New Particles\tlen: %d\tcap: %d\n\n", len(game.data.newParticles), cap(game.data.newParticles))
+
+		game.lastMemCheck = game.lastFrame
+
+		// runtime.GC()
+	}
+
 	if game.state == "quitting" {
 		runtime.GC()
 		PrintMemUsage()
@@ -52,8 +70,8 @@ func updateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 	playerCancelled := uiCancel(win, ui.currJoystick)
 
 	// lerp the camera position towards the player
-	game.camPos = pixel.Lerp(
-		game.camPos,
+	game.CamPos = pixel.Lerp(
+		game.CamPos,
 		player.origin.Scaled(0.75),
 		1-math.Pow(1.0/128, dt),
 	)
@@ -86,7 +104,7 @@ func updateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 			}
 			if game.menu.options[game.menu.selection] == "Main Menu" {
 				game.state = "main_menu"
-				playMenuMusic()
+				PlayMenuMusic()
 				game.menu = NewMainMenu()
 				game.data = *NewMenuGame()
 			}
@@ -116,7 +134,7 @@ func updateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 	if game.state == "start_screen" {
 		if playerConfirmed || playerCancelled {
 			game.state = "main_menu"
-			playMenuMusic()
+			PlayMenuMusic()
 			game.menu = NewMainMenu()
 			game.data = *NewMenuGame()
 		}
@@ -131,13 +149,13 @@ func updateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 	if game.state == "starting" {
 		if game.data.mode == "evolved" {
 			game.data = *NewEvolvedGame()
-			playMusic()
+			PlayMusic()
 		} else if game.data.mode == "pacifism" {
 			game.data = *NewPacifismGame()
-			playPacifismMusic()
+			PlayPacifismMusic()
 		} else {
 			game.data = *NewStoryGame()
-			playMenuMusic()
+			PlayMenuMusic()
 		}
 
 		game.state = "playing"
@@ -151,7 +169,7 @@ func updateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 			game.state = "starting"
 		} else if playerCancelled {
 			game.state = "main_menu"
-			playMenuMusic()
+			PlayMenuMusic()
 			game.menu = NewMainMenu()
 			game.data = *NewMenuGame()
 		}
@@ -345,7 +363,7 @@ func updateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 
 		player.Update(dt, game.totalTime, game.lastFrame)
 
-		aim := player.origin.To(ui.mousePos)
+		aim := player.origin.To(ui.MousePos)
 		gamepadAim := uiThumbstickVector(win, ui.currJoystick, pixelgl.AxisRightX, pixelgl.AxisRightY)
 
 		shooting := false
@@ -841,10 +859,10 @@ func updateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 				continue
 			}
 			if g_debug && win.JustPressed(pixelgl.MouseButton1) {
-				e.selected = e.Circle().Intersect(pixel.C(ui.mousePos, 4)).Radius > 0
+				e.selected = e.Circle().Intersect(pixel.C(ui.MousePos, 4)).Radius > 0
 				if e.entityType == "snek" {
 					for tID, snekT := range e.tail {
-						snekT.selected = snekT.Circle().Intersect(pixel.C(ui.mousePos, 4)).Radius > 0
+						snekT.selected = snekT.Circle().Intersect(pixel.C(ui.MousePos, 4)).Radius > 0
 						e.tail[tID] = snekT
 					}
 				}

@@ -1,4 +1,4 @@
-package main
+package starshipkepler
 
 import (
 	"fmt"
@@ -10,6 +10,8 @@ import (
 	"github.com/faiface/beep/speaker"
 	"github.com/faiface/pixel"
 )
+
+const maxParticles = 5000
 
 type menu struct {
 	selection int
@@ -83,16 +85,23 @@ type gamedata struct {
 	console bool
 }
 
+type debugInfo struct {
+	p1   pixel.Vec
+	p2   pixel.Vec
+	text string
+}
+
 type game struct {
 	state string
 	data  gamedata
 	menu  menu
 	grid  grid
 
-	camPos pixel.Vec
+	CamPos pixel.Vec
 
 	// Frame state
 	lastFrame          time.Time
+	lastMemCheck       time.Time
 	lastMenuChoiceTime time.Time
 	totalTime          float64
 	debugInfos         []debugInfo
@@ -278,11 +287,12 @@ func NewPacifismGame() *gamedata {
 func NewGame() *game {
 	game := new(game)
 	game.state = "main_menu"
-	game.data = *NewGameData()
+	game.data = *NewMenuGame()
 	game.menu = NewMainMenu()
-	game.camPos = pixel.ZV
+	game.CamPos = pixel.ZV
 	game.lastFrame = time.Now()
 	game.lastMenuChoiceTime = time.Now()
+	game.lastMemCheck = time.Now()
 
 	maxGridPoints := 2048.0
 	buffer := 256.0

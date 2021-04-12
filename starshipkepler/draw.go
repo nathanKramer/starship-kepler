@@ -1,4 +1,4 @@
-package main
+package starshipkepler
 
 import (
 	"fmt"
@@ -19,7 +19,7 @@ import (
 	"golang.org/x/image/font/basicfont"
 )
 
-type drawContext struct {
+type DrawContext struct {
 	// Draw targets
 	mapRect      *imdraw.IMDraw
 	imd          *imdraw.IMDraw
@@ -35,7 +35,7 @@ type drawContext struct {
 	outerWardBatch *imdraw.IMDraw
 
 	// Canvases
-	primaryCanvas *pixelgl.Canvas
+	PrimaryCanvas *pixelgl.Canvas
 	uiCanvas      *pixelgl.Canvas
 
 	// Post processing canvases
@@ -56,8 +56,8 @@ type drawContext struct {
 
 var basicFont *text.Atlas
 
-func NewDrawContext(cfg pixelgl.WindowConfig) *drawContext {
-	drawContext := new(drawContext)
+func NewDrawContext(cfg pixelgl.WindowConfig) *DrawContext {
+	drawContext := new(DrawContext)
 
 	mapRect := imdraw.New(nil)
 	mapRect.Color = color.RGBA{0x64, 0x64, 0xff, 0xbb}
@@ -84,7 +84,7 @@ func NewDrawContext(cfg pixelgl.WindowConfig) *drawContext {
 	drawContext.wardInner = pixel.NewSprite(wardInnerPic, wardInnerPic.Bounds())
 	drawContext.wardOuter = pixel.NewSprite(wardOuterPic, wardOuterPic.Bounds())
 
-	drawContext.primaryCanvas = pixelgl.NewCanvas(pixel.R(-cfg.Bounds.W()/2, -cfg.Bounds.H()/2, cfg.Bounds.W()/2, cfg.Bounds.H()/2))
+	drawContext.PrimaryCanvas = pixelgl.NewCanvas(pixel.R(-cfg.Bounds.W()/2, -cfg.Bounds.H()/2, cfg.Bounds.W()/2, cfg.Bounds.H()/2))
 	drawContext.uiCanvas = pixelgl.NewCanvas(pixel.R(-cfg.Bounds.W()/2, -cfg.Bounds.H()/2, cfg.Bounds.W()/2, cfg.Bounds.H()/2))
 
 	drawContext.bloom1 = pixelgl.NewCanvas(pixel.R(-cfg.Bounds.W()/2, -cfg.Bounds.H()/2, cfg.Bounds.W()/2, cfg.Bounds.H()/2))
@@ -223,15 +223,15 @@ func drawBullet(bullet *entityData, d *imdraw.IMDraw) {
 	}
 }
 
-func drawGame(win *pixelgl.Window, game *game, d *drawContext) {
+func DrawGame(win *pixelgl.Window, game *game, d *DrawContext) {
 	d.imd.Reset()
 	d.uiDraw.Reset()
 	d.bulletDraw.Reset()
 	d.particleDraw.Reset()
 	d.tmpTarget.Reset()
 
-	cam := pixel.IM.Moved(game.camPos.Scaled(-1))
-	d.primaryCanvas.SetMatrix(cam)
+	cam := pixel.IM.Moved(game.CamPos.Scaled(-1))
+	d.PrimaryCanvas.SetMatrix(cam)
 
 	// draw_
 	{
@@ -241,10 +241,10 @@ func drawGame(win *pixelgl.Window, game *game, d *drawContext) {
 
 		if game.state == "paused" || game.data.mode == "menu_game" || game.state == "game_over" {
 			a := (math.Min(game.totalTime, 4) / 8.0)
-			d.primaryCanvas.SetColorMask(pixel.Alpha(a))
+			d.PrimaryCanvas.SetColorMask(pixel.Alpha(a))
 			d.uiCanvas.SetColorMask(pixel.Alpha(math.Min(1.0, a*4)))
 		} else {
-			d.primaryCanvas.SetColorMask(pixel.Alpha(1.0))
+			d.PrimaryCanvas.SetColorMask(pixel.Alpha(1.0))
 		}
 
 		if game.data.console {
@@ -272,10 +272,10 @@ func drawGame(win *pixelgl.Window, game *game, d *drawContext) {
 			}
 		}
 
-		// Draw: grid effect
-		// TODO, extract?
-		// Add catmullrom splines?
 		if game.data.mode == "evolved" || game.data.mode == "pacifism" || game.data.mode == "menu_game" {
+			// Draw: grid effect
+			// TODO, extract?
+			// Add catmullrom splines?
 			width := len(game.grid.points)
 			height := len(game.grid.points[0])
 			d.imd.SetColorMask(pixel.Alpha(0.1))
@@ -342,9 +342,7 @@ func drawGame(win *pixelgl.Window, game *game, d *drawContext) {
 					}
 				}
 			}
-		}
 
-		if game.data.mode == "evolved" || game.data.mode == "pacifism" || game.data.mode == "menu_game" {
 			// draw: particles
 			d.imd.SetColorMask(pixel.Alpha(0.4))
 			for _, p := range game.data.particles {
@@ -602,8 +600,8 @@ func drawGame(win *pixelgl.Window, game *game, d *drawContext) {
 			}
 		}
 
-		d.primaryCanvas.Clear(colornames.Black)
-		d.imd.Draw(d.primaryCanvas)
+		d.PrimaryCanvas.Clear(colornames.Black)
+		d.imd.Draw(d.PrimaryCanvas)
 
 		// draw: wards
 		// todo move these batch initializers to run once territory
@@ -614,14 +612,14 @@ func drawGame(win *pixelgl.Window, game *game, d *drawContext) {
 		currentT := math.Sin(rotInterp)
 		ang := (currentT * 2 * math.Pi) - math.Pi
 
-		d.primaryCanvas.SetComposeMethod(pixel.ComposePlus)
+		d.PrimaryCanvas.SetComposeMethod(pixel.ComposePlus)
 		if len(game.data.player.elements) > 0 {
 			d.innerWardBatch.Clear()
 			d.innerWardBatch.SetMatrix(pixel.IM.Rotated(pixel.ZV, ang).Moved(game.data.player.origin))
 			el := game.data.player.elements[0]
 			d.innerWardBatch.SetColorMask(elements[el])
 			d.wardInner.Draw(d.innerWardBatch, pixel.IM.Scaled(pixel.ZV, 0.6))
-			d.innerWardBatch.Draw(d.primaryCanvas)
+			d.innerWardBatch.Draw(d.PrimaryCanvas)
 		}
 
 		if len(game.data.player.elements) > 1 {
@@ -630,7 +628,7 @@ func drawGame(win *pixelgl.Window, game *game, d *drawContext) {
 			d.outerWardBatch.SetMatrix(pixel.IM.Rotated(pixel.ZV, ang).Moved(game.data.player.origin))
 			d.outerWardBatch.SetColorMask(elements[el])
 			d.wardOuter.Draw(d.outerWardBatch, pixel.IM.Scaled(pixel.ZV, 0.6))
-			d.outerWardBatch.Draw(d.primaryCanvas)
+			d.outerWardBatch.Draw(d.PrimaryCanvas)
 		}
 
 		// if len(game.data.player.elements) > 2 {
@@ -639,22 +637,22 @@ func drawGame(win *pixelgl.Window, game *game, d *drawContext) {
 		// 	d.innerWardBatch.SetMatrix(pixel.IM.Rotated(pixel.ZV, ang).Moved(game.data.player.origin))
 		// 	d.innerWardBatch.SetColorMask(elements[el])
 		// 	d.wardInner.Draw(innerWardBatch, pixel.IM.Scaled(pixel.ZV, 0.6))
-		// 	d.innerWardBatch.Draw(d.primaryCanvas)
+		// 	d.innerWardBatch.Draw(d.PrimaryCanvas)
 		// }
-		d.primaryCanvas.SetComposeMethod(pixel.ComposeOver)
+		d.PrimaryCanvas.SetComposeMethod(pixel.ComposeOver)
 
 		if game.data.mode != "story" {
-			d.mapRect.Draw(d.primaryCanvas)
+			d.mapRect.Draw(d.PrimaryCanvas)
 		}
 
 		d.bloom1.Clear(colornames.Black)
 		d.bloom2.Clear(colornames.Black)
-		d.primaryCanvas.Draw(d.bloom1, pixel.IM.Moved(d.primaryCanvas.Bounds().Center()))
-		d.bloom1.Draw(d.bloom2, pixel.IM.Moved(d.primaryCanvas.Bounds().Center()))
+		d.PrimaryCanvas.Draw(d.bloom1, pixel.IM.Moved(d.PrimaryCanvas.Bounds().Center()))
+		d.bloom1.Draw(d.bloom2, pixel.IM.Moved(d.PrimaryCanvas.Bounds().Center()))
 		d.bloom1.Clear(colornames.Black)
-		d.primaryCanvas.Draw(d.bloom1, pixel.IM.Moved(d.primaryCanvas.Bounds().Center()))
-		d.bloom2.Draw(d.bloom1, pixel.IM.Moved(d.primaryCanvas.Bounds().Center()))
-		d.bloom1.Draw(d.bloom3, pixel.IM.Moved(d.primaryCanvas.Bounds().Center()))
+		d.PrimaryCanvas.Draw(d.bloom1, pixel.IM.Moved(d.PrimaryCanvas.Bounds().Center()))
+		d.bloom2.Draw(d.bloom1, pixel.IM.Moved(d.PrimaryCanvas.Bounds().Center()))
+		d.bloom1.Draw(d.bloom3, pixel.IM.Moved(d.PrimaryCanvas.Bounds().Center()))
 
 		d.imd.Clear()
 		if game.state == "playing" {
@@ -673,18 +671,18 @@ func drawGame(win *pixelgl.Window, game *game, d *drawContext) {
 
 					growth := (0.5 - (float64(e.expiry.Sub(game.lastFrame).Milliseconds()) / 300.0))
 					e.text.Draw(
-						d.primaryCanvas,
+						d.PrimaryCanvas,
 						pixel.IM.Scaled(e.text.Orig, 1.0-growth),
 					)
 				}
 
 				if g_debug {
-					e.DrawDebug(fmt.Sprintf("%d", eID), d.imd, d.primaryCanvas)
+					e.DrawDebug(fmt.Sprintf("%d", eID), d.imd, d.PrimaryCanvas)
 				}
 			}
 
 			if g_debug {
-				game.data.player.DrawDebug("player", d.imd, d.primaryCanvas)
+				game.data.player.DrawDebug("player", d.imd, d.PrimaryCanvas)
 				for _, debugLog := range game.debugInfos {
 					if debugLog != (debugInfo{}) {
 						d.imd.Color = colornames.Whitesmoke
@@ -692,7 +690,7 @@ func drawGame(win *pixelgl.Window, game *game, d *drawContext) {
 						d.imd.Line(2)
 					}
 				}
-				d.imd.Draw(d.primaryCanvas)
+				d.imd.Draw(d.PrimaryCanvas)
 			}
 		}
 
@@ -708,7 +706,7 @@ func drawGame(win *pixelgl.Window, game *game, d *drawContext) {
 		win.SetComposeMethod(pixel.ComposePlus)
 		// bloom2.Draw(win, pixel.IM.Moved(bloom2.Bounds().Center()))
 		d.bloom3.Draw(win, pixel.IM.Moved(d.bloom2.Bounds().Center()))
-		d.primaryCanvas.Draw(win, pixel.IM.Moved(d.primaryCanvas.Bounds().Center()))
+		d.PrimaryCanvas.Draw(win, pixel.IM.Moved(d.PrimaryCanvas.Bounds().Center()))
 
 		d.imd.Clear()
 		d.imd.Color = colornames.Orange

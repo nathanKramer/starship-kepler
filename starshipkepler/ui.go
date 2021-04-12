@@ -1,4 +1,4 @@
-package main
+package starshipkepler
 
 import (
 	"fmt"
@@ -22,7 +22,7 @@ const uiActionStop = pixelgl.KeyLeftAlt
 
 type uiContext struct {
 	currJoystick pixelgl.Joystick
-	mousePos     pixel.Vec
+	MousePos     pixel.Vec
 }
 
 func initJoystick(win *pixelgl.Window) pixelgl.Joystick {

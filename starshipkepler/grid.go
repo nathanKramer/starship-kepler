@@ -1,4 +1,4 @@
-package main
+package starshipkepler
 
 import "github.com/faiface/pixel"
 

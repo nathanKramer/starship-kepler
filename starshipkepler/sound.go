@@ -1,4 +1,4 @@
-package main
+package starshipkepler
 
 import (
 	"os"
@@ -116,7 +116,7 @@ func init() {
 	speaker.Init(soundFormat.SampleRate, soundFormat.SampleRate.N(time.Second/10))
 }
 
-func playIntroMusic() {
+func PlayIntroMusic() {
 	speaker.Clear()
 	s := *introStreamer
 	s.Seek(0)
@@ -124,7 +124,7 @@ func playIntroMusic() {
 	// defer s.Close()
 }
 
-func playPacifismMusic() {
+func PlayPacifismMusic() {
 	speaker.Clear()
 	s := *pacifismMusicStreamer
 	s.Seek(0)
@@ -132,7 +132,7 @@ func playPacifismMusic() {
 	// defer s.Close()
 }
 
-func playMenuMusic() {
+func PlayMenuMusic() {
 	speaker.Clear()
 	s := *menuMusicStreamer
 	s.Seek(0)
@@ -140,7 +140,7 @@ func playMenuMusic() {
 	// defer s.Close()
 }
 
-func playMusic() {
+func PlayMusic() {
 	speaker.Clear()
 	s := *musicStreamer
 	s.Seek(0)
