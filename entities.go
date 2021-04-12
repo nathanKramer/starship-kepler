@@ -272,8 +272,7 @@ func (e *entityData) IntersectWithPlayer(
 	eID int,
 	game *game,
 	player *entityData,
-	currTime time.Time,
-	gameOverTxt *text.Text) {
+	currTime time.Time) {
 	if e.entityType == "gate" {
 		game.grid.ApplyExplosiveForce(100, Vector3{e.origin.X, e.origin.Y, 0.0}, 100)
 
@@ -358,15 +357,6 @@ func (e *entityData) IntersectWithPlayer(
 					}
 					game.data.spawning = false
 
-					gameOverTxt.Clear()
-					lines := []string{
-						"Score: " + fmt.Sprintf("%d", game.data.score),
-						"Press enter to restart",
-					}
-					for _, line := range lines {
-						gameOverTxt.Dot.X -= (gameOverTxt.BoundsOf(line).W() / 2)
-						fmt.Fprintln(gameOverTxt, line)
-					}
 				}
 			}
 		}

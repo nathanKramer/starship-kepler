@@ -1,772 +1,1240 @@
 package main
 
 import (
-	"fmt"
 	"math"
 	"math/rand"
+	"runtime"
 	"time"
 
 	"github.com/faiface/beep/effects"
 	"github.com/faiface/beep/speaker"
 	"github.com/faiface/pixel"
+	"github.com/faiface/pixel/pixelgl"
+	"github.com/nathanKramer/starship-kepler/sliceextra"
+	"golang.org/x/image/colornames"
 )
 
-type menu struct {
-	selection int
-	options   []string
-}
-
-type wavedata struct {
-	waveDuration float64
-	waveStart    time.Time
-	waveEnd      time.Time
-	entityType   string
-	spawnFreq    float64
-	lastSpawn    time.Time
-}
-
-type weapondata struct {
-	fireRate    float64
-	conicAngle  float64
-	randomCone  float64
-	bulletCount int
-	bulletSize  float64
-	velocity    float64
-	reflective  int
-	duration    float64
-}
-
-type gamedata struct {
-	mode            string
-	lives           int
-	bombs           int
-	scoreMultiplier int
-
-	entities     []entityData
-	bullets      []bullet
-	particles    []particle
-	newEntities  []entityData
-	newParticles []particle
-	newBullets   []bullet
-
-	spawns         int
-	spawnCount     int
-	pendingSpawns  int
-	scoreSinceBorn int
-	killsSinceBorn int
-	player         entityData
-	weapon         weapondata
-	waves          []wavedata
-
-	score             int
-	kills             int
-	lifeReward        int
-	bombReward        int
-	multiplierReward  int
-	weaponUpgradeFreq float64
-	waveFreq          float64
-	landingPartyFreq  float64
-	ambientSpawnFreq  float64
-	notoriety         float64
-	timescale         float64
-	spawning          bool
-
-	gameStart         time.Time
-	lastSpawn         time.Time
-	lastBullet        time.Time
-	lastBomb          time.Time
-	lastWave          time.Time
-	lastWeaponUpgrade time.Time
-
-	console bool
-}
-
-type game struct {
-	state string
-	data  gamedata
-	menu  menu
-	grid  grid
-}
-
-// Menus
-var implementedMenuItems = []string{"Quick Play: Evolved", "Quick Play: Pacifism", "Options", "Quit", "Resume", "Main Menu"}
-
-func NewMainMenu() menu {
-	return menu{
-		selection: 1,
-		options: []string{
-			"Story Mode",
-			"Quick Play: Evolved",
-			"Quick Play: Pacifism",
-			"Leaderboard",
-			"Achievements",
-			"Options",
-			"Quit",
-		},
+func updateGame(win *pixelgl.Window, game *game, ui *uiContext) {
+	if game.state == "quitting" {
+		runtime.GC()
+		PrintMemUsage()
+		win.SetClosed(true)
 	}
-}
-
-func NewPauseMenu() menu {
-	return menu{
-		selection: 0,
-		options: []string{
-			"Resume",
-			"Main Menu",
-		},
+	if game.state == "reset" {
+		game.state = "main_menu"
+		game.data = *NewGameData()
+		game.menu = NewMainMenu()
 	}
-}
 
-func NewOptionsMenu() menu {
-	return menu{
-		selection: 0,
-		options: []string{
-			"Resume",
-			"Main Menu",
-		},
+	// update
+	dt := math.Min(time.Since(game.lastFrame).Seconds(), 0.1) * game.data.timescale
+	game.totalTime += dt
+	game.lastFrame = time.Now()
+
+	if g_debug {
+		game.debugInfos = []debugInfo{}
 	}
-}
 
-func NewWaveData(entityType string, freq float64, duration float64) *wavedata {
-	waveData := new(wavedata)
-	waveData.waveDuration = duration
-	waveData.waveStart = time.Now()
-	waveData.spawnFreq = freq
-	waveData.entityType = entityType
-	waveData.waveEnd = time.Now().Add(time.Second * time.Duration(duration))
+	player := &game.data.player
 
-	return waveData
-}
+	uiGamePadDir := pixel.Vec{}
+	if win.JoystickPresent(ui.currJoystick) {
+		moveVec := uiThumbstickVector(
+			win,
+			ui.currJoystick,
+			pixelgl.AxisLeftX,
+			pixelgl.AxisLeftY,
+		)
+		uiGamePadDir = moveVec
+	}
 
-func NewWeaponData() *weapondata {
-	weaponData := new(weapondata)
-	weaponData.velocity = 1100
-	weaponData.fireRate = 0.15
-	weaponData.bulletCount = 2
-	weaponData.bulletSize = 8
-	weaponData.conicAngle = 0
-	weaponData.randomCone = 0
-	weaponData.duration = 5.0
+	playerConfirmed := uiConfirm(win, ui.currJoystick)
+	playerCancelled := uiCancel(win, ui.currJoystick)
 
-	return weaponData
-}
-
-func NewBurstWeapon() *weapondata {
-	weaponData := new(weapondata)
-	weaponData.velocity = 1100
-	weaponData.fireRate = 0.15
-	weaponData.bulletCount = 5
-	weaponData.bulletSize = 8
-	weaponData.conicAngle = 0
-	weaponData.randomCone = 0
-
-	return weaponData
-}
-
-func NewConicWeapon() *weapondata {
-	weaponData := new(weapondata)
-	weaponData.velocity = 1400
-	weaponData.fireRate = 0.1
-	weaponData.bulletSize = 8
-	weaponData.conicAngle = 8
-	weaponData.randomCone = 0
-
-	return weaponData
-}
-
-func NewGameData() *gamedata {
-	gameData := new(gamedata)
-	gameData.mode = "none"
-	gameData.lives = 500
-	gameData.bombs = 3
-	gameData.scoreMultiplier = 1
-
-	gameData.entities = make([]entityData, 0, 200)
-	gameData.bullets = make([]bullet, 0, 500)
-	gameData.particles = make([]particle, 0, maxParticles)
-	gameData.newEntities = make([]entityData, 0, 200)
-	gameData.newBullets = make([]bullet, 0, 500)
-	gameData.newParticles = make([]particle, 0, 1000)
-
-	gameData.player = *NewPlayer(0.0, 0.0)
-	gameData.spawns = 0
-	gameData.spawnCount = 1
-	gameData.pendingSpawns = 0
-	gameData.scoreSinceBorn = 0
-	gameData.killsSinceBorn = 0
-
-	gameData.score = 0
-	gameData.kills = 0
-	gameData.notoriety = 0.0 // brings new enemy types into ambient spawning gradually
-	gameData.spawning = true
-	gameData.lastSpawn = time.Now()
-	gameData.lastBullet = time.Now()
-	gameData.lastBomb = time.Now()
-	gameData.lastWeaponUpgrade = time.Time{}
-	gameData.lastWave = time.Time{}
-	gameData.gameStart = time.Now()
-	gameData.timescale = 1.0
-
-	gameData.console = false
-
-	return gameData
-}
-
-func NewMenuGame() *gamedata {
-	data := NewGameData()
-	data.mode = "menu_game"
-	data.timescale = 0.4
-	data.weapon = *NewBurstWeapon()
-	data.multiplierReward = 25 // kills
-	data.lifeReward = 75000
-	data.bombReward = 100000
-	data.waveFreq = 30 // waves have a duration so can influence the pace of the game
-	data.weaponUpgradeFreq = 30
-	data.landingPartyFreq = 10 // more strategic one-off spawn systems
-	data.ambientSpawnFreq = 3  // ambient spawning can be toggled off temporarily, but is otherwise always going on
-	return data
-}
-
-func NewStoryGame() *gamedata {
-	data := NewGameData()
-	data.mode = "story"
-	data.weapon = *NewWeaponData()
-	data.multiplierReward = 25 // kills
-	data.lifeReward = 75000
-	data.bombReward = 100000
-	data.waveFreq = 30 // waves have a duration so can influence the pace of the game
-	data.weaponUpgradeFreq = 30
-	data.landingPartyFreq = 10 // more strategic one-off spawn systems
-	data.ambientSpawnFreq = 3  // ambient spawning can be toggled off temporarily, but is otherwise always going on
-	return data
-}
-
-func NewEvolvedGame() *gamedata {
-	data := NewGameData()
-	data.mode = "evolved"
-	data.weapon = *NewWeaponData()
-	data.lives = 3
-	data.multiplierReward = 25 // kills
-	data.lifeReward = 75000
-	data.bombReward = 100000
-	data.waveFreq = 5 // waves have a duration so can influence the pace of the game
-	data.weaponUpgradeFreq = 30
-	data.landingPartyFreq = 10 // more strategic one-off spawn systems
-	data.ambientSpawnFreq = 3  // ambient spawning can be toggled off temporarily, but is otherwise always going on
-	return data
-}
-
-func NewPacifismGame() *gamedata {
-	data := NewGameData()
-	data.mode = "pacifism"
-	data.lives = 1
-	data.spawnCount = 3
-	data.ambientSpawnFreq = 2 // ambient spawning can be toggled off temporarily, but is otherwise always going on
-	return data
-}
-
-func NewGame() *game {
-	game := new(game)
-	game.state = "main_menu"
-	game.data = *NewGameData()
-	game.menu = NewMainMenu()
-
-	maxGridPoints := 2048.0
-	buffer := 256.0
-	gridSpacing := math.Sqrt(worldWidth * worldHeight / maxGridPoints)
-	game.grid = NewGrid(
-		pixel.R(
-			-worldWidth/2-buffer,
-			-worldHeight/2-buffer,
-			worldWidth/2+buffer,
-			worldHeight/2+buffer,
-		),
-		pixel.V(
-			gridSpacing,
-			gridSpacing,
-		),
+	// lerp the camera position towards the player
+	game.camPos = pixel.Lerp(
+		game.camPos,
+		player.origin.Scaled(0.75),
+		1-math.Pow(1.0/128, dt),
 	)
 
-	return game
-}
+	if game.state == "main_menu" || game.state == "paused" {
+		if playerConfirmed {
+			if game.menu.options[game.menu.selection] == "Story Mode" {
+				game.state = "starting"
+				game.data = *NewStoryGame()
+			}
+			if game.menu.options[game.menu.selection] == "Quick Play: Evolved" {
+				game.state = "starting"
+				game.data = *NewEvolvedGame()
+			}
+			if game.menu.options[game.menu.selection] == "Quick Play: Pacifism" {
+				game.state = "starting"
+				game.data = *NewPacifismGame()
+			}
+			if game.menu.options[game.menu.selection] == "Options" {
+				game.menu = NewOptionsMenu()
+			}
+			if game.menu.options[game.menu.selection] == "Main Menu" {
+				game.state = "reset"
+			}
+			if game.menu.options[game.menu.selection] == "Quit" {
+				game.state = "quitting"
+			}
+			if game.menu.options[game.menu.selection] == "Resume" {
+				game.state = "playing"
+			}
+			if game.menu.options[game.menu.selection] == "Main Menu" {
+				game.state = "main_menu"
+				playMenuMusic()
+				game.menu = NewMainMenu()
+				game.data = *NewMenuGame()
+			}
+		}
 
-func FireBullet(aim pixel.Vec, game *game, origin pixel.Vec, player *entityData) {
-	width := float64(game.data.weapon.bulletCount) * 5.0
-	rad := math.Atan2(aim.Unit().Y, aim.Unit().X)
-	for i := 0; i < game.data.weapon.bulletCount; i++ {
-		bPos := pixel.V(
-			25.0,
-			-(width/2)+(float64(i)*(width/float64(game.data.weapon.bulletCount))),
-		).Rotated(
-			rad,
-		).Add(origin)
+		implemented := 0
+		for _, option := range game.menu.options {
+			if sliceextra.Contains(implementedMenuItems, option) {
+				implemented += 1
+			}
+		}
 
-		increment := (float64(i) * math.Pi / 180.0) - (2 * math.Pi / 180)
-		b := NewBullet(
-			bPos.X,
-			bPos.Y,
-			game.data.weapon.bulletSize,
-			game.data.weapon.velocity,
-			aim.Unit().Rotated(increment),
-			append([]string{}, player.elements...),
-			game.data.weapon.duration,
-		)
-		game.data.newBullets = InlineAppendBullets(game.data.newBullets, *b)
+		menuChange := uiChangeSelection(win, uiGamePadDir, game.lastFrame, game.lastMenuChoiceTime)
+		if menuChange != 0 {
+			game.menu.selection = (game.menu.selection + menuChange) % len(game.menu.options)
+			for (implemented > 0) && !sliceextra.Contains(implementedMenuItems, game.menu.options[game.menu.selection]) {
+				game.menu.selection = (game.menu.selection + menuChange) % len(game.menu.options)
+				if game.menu.selection < 0 {
+					// would have thought modulo would handle negatives. /shrug
+					game.menu.selection += len(game.menu.options)
+				}
+			}
+			game.lastMenuChoiceTime = time.Now()
+		}
 	}
-}
 
-func (data *gamedata) respawnPlayer() {
-	for entID, _ := range data.newEntities {
-		data.newEntities[entID] = entityData{}
+	if game.state == "start_screen" {
+		if playerConfirmed || playerCancelled {
+			game.state = "main_menu"
+			playMenuMusic()
+			game.menu = NewMainMenu()
+			game.data = *NewMenuGame()
+		}
 	}
-	for entID, _ := range data.entities {
-		data.entities[entID] = entityData{}
-	}
-	for bullID, _ := range data.bullets {
-		data.bullets[bullID] = bullet{}
-	}
-	data.player = *NewPlayer(0.0, 0.0)
-	data.weapon = *NewWeaponData()
-	data.scoreMultiplier = 1
-	data.scoreSinceBorn = 0
-	data.killsSinceBorn = 0
-}
 
-func (data *gamedata) AmbientSpawnFreq() float64 {
-	return data.ambientSpawnFreq * data.timescale
-}
+	if game.state == "paused" {
+		if playerCancelled {
+			game.state = "playing"
+		}
+	}
 
-func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime float64, player *entityData) {
-	// ambient spawns
-	if !debug && last.Sub(game.data.lastSpawn).Seconds() > game.data.AmbientSpawnFreq() && game.data.spawning {
-		// spawn
-		spawns := make([]entityData, 0, game.data.spawnCount)
-		for i := 0; i < game.data.spawnCount; i++ {
-			pos := pixel.V(
-				float64(rand.Intn(worldWidth)-worldWidth/2),
-				float64(rand.Intn(worldHeight)-worldHeight/2),
-			)
-			// to regulate distance from player
-			for pos.Sub(player.origin).Len() < 450 {
-				pos = pixel.V(
-					float64(rand.Intn(worldWidth)-worldWidth/2),
-					float64(rand.Intn(worldHeight)-worldHeight/2),
+	if game.state == "starting" {
+		if game.data.mode == "evolved" {
+			game.data = *NewEvolvedGame()
+			playMusic()
+		} else if game.data.mode == "pacifism" {
+			game.data = *NewPacifismGame()
+			playPacifismMusic()
+		} else {
+			game.data = *NewStoryGame()
+			playMenuMusic()
+		}
+
+		game.state = "playing"
+	}
+
+	if (game.state == "playing" && g_debug) && playerConfirmed {
+		game.state = "starting"
+	}
+	if game.state == "game_over" {
+		if playerConfirmed {
+			game.state = "starting"
+		} else if playerCancelled {
+			game.state = "main_menu"
+			playMenuMusic()
+			game.menu = NewMainMenu()
+			game.data = *NewMenuGame()
+		}
+	}
+
+	direction := pixel.ZV
+	if game.state == "playing" {
+		if !player.alive {
+			game.respawnPlayer()
+			game.grid.ApplyDirectedForce(Vector3{0.0, 0.0, 1400.0}, Vector3{player.origin.X, player.origin.Y, 0.0}, 80)
+		}
+
+		if uiPause(win, ui.currJoystick) {
+			game.state = "paused"
+			game.menu = NewPauseMenu()
+		}
+
+		if win.JustPressed(pixelgl.KeyGraveAccent) {
+			game.data.console = !game.data.console
+		}
+
+		// player controls
+		if game.data.console {
+			if win.JustPressed(pixelgl.KeyEnter) {
+				game.data.console = false
+			}
+		} else {
+			if win.JustPressed(pixelgl.KeyMinus) {
+				game.data.timescale *= 0.5
+				if game.data.timescale < 0.1 {
+					game.data.timescale = 0.0
+				}
+			}
+			if win.JustPressed(pixelgl.KeyEqual) {
+				game.data.timescale *= 2.0
+				if game.data.timescale > 4.0 || game.data.timescale == 0.0 {
+					game.data.timescale = 1.0
+				}
+			}
+			if win.JustPressed(pixelgl.Key1) {
+				game.data.weapon = *NewWeaponData()
+			}
+			if win.JustPressed(pixelgl.Key2) {
+				game.data.weapon = *NewBurstWeapon()
+			}
+			if win.JustPressed(pixelgl.Key3) {
+				game.data.weapon = *NewConicWeapon()
+			}
+
+			// player.velocity = pixel.ZV
+			// if win.Pressed(uiActionAct) {
+			// mouse based target movement
+			// 	player.target = mp
+			// }
+
+			// if win.Pressed(uiActionSwitchMode) {
+			// 	// GW
+			// 	player.mode = "GW"
+			// 	player.elements = make([]string, 0)
+			// } else {
+			// 	player.mode = "MWW"
+			// }
+
+			if win.Pressed(pixelgl.KeyLeft) || win.Pressed(pixelgl.KeyA) {
+				direction = direction.Add(pixel.V(-1, 0))
+				player.target = pixel.Vec{}
+			}
+			if win.Pressed(pixelgl.KeyUp) || win.Pressed(pixelgl.KeyW) {
+				direction = direction.Add(pixel.V(0, 1))
+				player.target = pixel.Vec{}
+			}
+			if win.Pressed(pixelgl.KeyRight) || win.Pressed(pixelgl.KeyD) {
+				direction = direction.Add(pixel.V(1, 0))
+				player.target = pixel.Vec{}
+			}
+			if win.Pressed(pixelgl.KeyDown) || win.Pressed(pixelgl.KeyS) {
+				direction = direction.Add(pixel.V(0, -1))
+				player.target = pixel.Vec{}
+			}
+
+			if win.JustPressed(pixelgl.KeyQ) || win.JoystickJustPressed(ui.currJoystick, pixelgl.ButtonX) {
+				player.QueueElement("water")
+			}
+			if win.JustPressed(pixelgl.KeyE) || win.JoystickJustPressed(ui.currJoystick, pixelgl.ButtonRightBumper) {
+				player.QueueElement("chaos")
+			}
+			if win.JustPressed(pixelgl.KeyR) || win.JoystickJustPressed(ui.currJoystick, pixelgl.ButtonLeftBumper) {
+				player.QueueElement("spirit")
+			}
+			if win.JustPressed(pixelgl.KeyF) || win.JoystickJustPressed(ui.currJoystick, pixelgl.ButtonB) {
+				player.QueueElement("fire")
+			}
+			if win.JustPressed(pixelgl.KeyZ) || win.JoystickJustPressed(ui.currJoystick, pixelgl.ButtonA) {
+				player.QueueElement("lightning")
+			}
+			if win.JustPressed(pixelgl.KeyX) || win.JoystickJustPressed(ui.currJoystick, pixelgl.ButtonY) {
+				player.QueueElement("wind")
+			}
+			if win.JustPressed(pixelgl.KeyC) {
+				player.QueueElement("life")
+			}
+
+			if win.Pressed(uiActionStop) || player.origin.To(player.target).Len() < 50.0 {
+				player.target = pixel.Vec{}
+			}
+
+			if (player.target != pixel.Vec{}) {
+				direction = direction.Add(player.origin.To(player.target).Unit())
+				midColor := HSVToColor(3.0, 0.7, 1.0)
+				game.data.newParticles = InlineAppendParticles(
+					game.data.newParticles,
+					NewParticle(player.target.X, player.target.Y, midColor, 32.0, pixel.V(0.5, 1.0), 0.0, randomVector(1), 1.0, "ship"),
 				)
 			}
 
-			var enemy entityData
-			notoriety := math.Min(0.31, game.data.notoriety)
-			r := rand.Float64() * (0.2 + notoriety)
-			if r <= 0.1 {
-				enemy = *NewWanderer(pos.X, pos.Y)
-			} else if r <= 0.4 {
-				enemy = *NewFollower(pos.X, pos.Y)
-			} else if r <= 0.43 {
-				enemy = *NewPinkSquare(pos.X, pos.Y)
-			} else if r <= 0.49 {
-				enemy = *NewDodger(pos.X, pos.Y)
-			} else if r <= 0.5 {
-				enemy = *NewBlackHole(pos.X, pos.Y)
-			} else {
-				enemy = *NewSnek(pos.X, pos.Y)
+			if win.JoystickPresent(ui.currJoystick) {
+				moveVec := uiThumbstickVector(
+					win,
+					ui.currJoystick,
+					pixelgl.AxisLeftX,
+					pixelgl.AxisLeftY,
+				)
+				direction = direction.Add(moveVec)
 			}
-
-			spawns = append(spawns, enemy)
 		}
 
-		PlaySpawnSounds(spawns)
-		game.data.entities = append(game.data.entities, spawns...)
-		game.data.spawns += len(spawns)
-		game.data.lastSpawn = time.Now()
-
-		game.data.spawnCount = 1
-		n := int(math.Min(float64(game.data.spawns/50), 4))
-		if n > game.data.spawnCount {
-			game.data.spawnCount = n
-		}
+		// paste debug.go
 	}
 
-	game.data.notoriety = float64(game.data.kills) / 100.0
-
-	livingEntities := 0
-	for _, e := range game.data.entities {
-		if e.alive {
-			livingEntities++
+	// main game update
+	if game.state == "playing" || game.state == "game_over" || game.data.mode == "menu_game" {
+		if game.data.mode == "menu_game" {
+			if player.target.Len() == 0 || player.origin.To(player.target).Len() < 5.0 {
+				poi := pixel.V(
+					(rand.Float64()*worldWidth)-worldWidth/2.0,
+					(rand.Float64()*worldHeight)-worldHeight/2.0,
+				)
+				player.target = player.origin.Sub(poi).Unit().Scaled(rand.Float64()*400 + 200)
+				enforceWorldBoundary(&player.target, player.radius*2)
+			}
+			player.orientation = player.orientation.Rotated(60 * math.Pi / 180 * dt).Unit()
+			direction = player.origin.To(player.target).Unit()
 		}
-	}
 
-	// wave management
-	waveDead := livingEntities == 0 && (game.data.pendingSpawns == 0 && !game.data.spawning)
-	firstWave := game.data.lastWave == (time.Time{}) && totalTime >= 2
-	subsequentWave := (game.data.lastWave != (time.Time{}) &&
-		(last.Sub(game.data.lastWave).Seconds() >= game.data.waveFreq) || waveDead)
+		if direction.Len() > 0.2 {
+			orientationDt := (pixel.Lerp(
+				player.orientation,
+				direction,
+				1-math.Pow(1.0/512, dt),
+			))
+			player.orientation = orientationDt
+			player.Propel(direction, dt)
+			// player.velocity = direction.Unit().Scaled(player.speed)
 
-	if !debug && (firstWave || subsequentWave) {
-		// New wave, so re-assess wave frequency etc in case it was set by a custom wave
-		game.data.ambientSpawnFreq = math.Max(
-			1.0,
-			3-((float64(game.data.spawns)/30.0)*0.5),
-		)
-		game.data.waveFreq = math.Max(
-			5.0, 30.0-(3*game.data.notoriety),
-		)
+			// partile stream
+			baseVelocity := orientationDt.Unit().Scaled(-1 * player.speed).Scaled(dt)
+			perpVel := pixel.V(baseVelocity.Y, -baseVelocity.X).Scaled(0.2 * math.Sin(game.totalTime*10))
+			hue := math.Mod(((math.Mod(game.totalTime, 16.0) / 16.0) * 6.0), 6.0)
+			hue2 := math.Mod(hue+0.6, 6.0)
+			midColor := HSVToColor(hue, 0.7, 1.0)
+			sideColor := HSVToColor(hue2, 0.5, 1.0)
+			white := HSVToColor(hue2, 0.1, 1.0)
+			pos := player.origin.Add(baseVelocity.Unit().Scaled(player.radius * 0.8))
 
-		game.data.spawning = false
-		corners := [4]pixel.Vec{
-			pixel.V(-(worldWidth/2)+80, -(worldHeight/2)+80),
-			pixel.V(-(worldWidth/2)+80, (worldHeight/2)-80),
-			pixel.V((worldWidth/2)-80, -(worldHeight/2)+80),
-			pixel.V((worldWidth/2)-80, (worldHeight/2)-80),
+			// boosting := win.Pressed(pixelgl.KeyLeftShift) || win.JoystickAxis(currJoystick, pixelgl.AxisLeftTrigger) > 0.1
+			// if boosting {
+			// 	SetBoosting(player)
+			// } else {
+			// 	SetDefaultPlayerSpeed(player)
+			// }
+
+			vel1 := baseVelocity.Add(perpVel).Add(randomVector((0.2)))
+			vel2 := baseVelocity.Sub(perpVel).Add(randomVector((0.2)))
+			game.data.newParticles = InlineAppendParticles(
+				game.data.newParticles,
+				NewParticle(pos.X, pos.Y, midColor, 32.0, pixel.V(0.5, 1.0), 0.0, baseVelocity, 1.0, "ship"),
+				NewParticle(pos.X, pos.Y, sideColor, 24.0, pixel.V(1.0, 1.0), 0.0, vel1.Scaled(1.5), 1.0, "ship"),
+				NewParticle(pos.X, pos.Y, sideColor, 24.0, pixel.V(1.0, 1.0), 0.0, vel2.Scaled(1.5), 1.0, "ship"),
+				// NewParticle(pos.X, pos.Y, white, 24.0, pixel.V(0.5, 1.0), 0.0, vel1, 1.0, "ship"),
+				// NewParticle(pos.X, pos.Y, white, 24.0, pixel.V(0.5, 1.0), 0.0, vel2, 1.0, "ship"),
+			)
+
+			if player.speed > 600 {
+				game.data.newParticles = InlineAppendParticles(
+					game.data.newParticles,
+					NewParticle(pos.X, pos.Y, white, 32.0, pixel.V(1.0, 1.0), 0.0, vel1.Add(perpVel), 2.0, "ship"),
+					NewParticle(pos.X, pos.Y, white, 32.0, pixel.V(1.0, 1.0), 0.0, vel2.Sub(perpVel), 2.0, "ship"),
+				)
+			}
 		}
-		// one-off landing party
-		fmt.Printf("[LandingPartySpawn] %s\n", time.Now().String())
-		r := rand.Float64() * (0.2 + math.Min(game.data.notoriety, 0.8))
-		spawns := make([]entityData, 0, game.data.spawnCount)
 
-		// landing party spawn
-		{
-			if r <= 0.1 {
-				// if we roll 0.1, just do a wave of ambient spawning
-				game.data.waveFreq = 10
-				game.data.spawning = true
-			} else if r <= 0.25 {
-				count := 2 + rand.Intn(4)
-				for i := 0; i < count; i++ {
-					p := corners[i%4]
-					enemy := NewDodger(
-						p.X,
-						p.Y,
-					)
-					spawns = append(spawns, *enemy)
-				}
-			} else if r <= 0.28 {
-				count := 2 + rand.Intn(4)
-				for i := 0; i < count; i++ {
-					p := corners[i%4]
-					enemy := NewPinkSquare(
-						p.X,
-						p.Y,
-					)
-					spawns = append(spawns, *enemy)
-				}
-			} else if r <= 0.35 {
-				count := 8 + rand.Intn(4)
-				for i := 0; i < count; i++ {
-					p := corners[i%4]
-					enemy := NewSnek(
-						p.X,
-						p.Y,
-					)
-					spawns = append(spawns, *enemy)
-				}
-			} else if r <= 0.5 {
-				r := rand.Intn(4)
-				var t string
-				var freq float64
-				var duration float64
-				switch r {
-				case 0:
-					t = "follower"
-					freq = 0.5
-					duration = 10.0
-				case 1:
-					t = "dodger"
-					freq = 0.25
-					duration = 3.0
-				case 2:
-					t = "pink"
-					freq = 0.2
-					duration = 1.0
-				case 3:
-					t = "replicator"
-					freq = 0.2
-					duration = 5.0
-				}
+		player.Update(dt, game.totalTime, game.lastFrame)
 
-				game.data.waves = append(game.data.waves, *NewWaveData(t, freq, duration))
-				game.data.lastWave = last
-			} else if r <= 0.55 {
-				total := 8.0
-				step := 360.0 / total
-				for i := 0.0; i < total; i++ {
-					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-					spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(450.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-					spawns = append(
-						spawns,
-						*NewFollower(spawnPos.X, spawnPos.Y),
-						*NewFollower(spawnPos2.X, spawnPos2.Y),
-					)
-				}
-			} else if r <= 0.575 {
-				total := 8.0
-				step := 360.0 / total
-				for i := 0.0; i < total; i++ {
-					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-					spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(450.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-					spawns = append(
-						spawns,
-						*NewDodger(spawnPos.X, spawnPos.Y),
-						*NewDodger(spawnPos2.X, spawnPos2.Y),
-					)
-				}
-			} else if r <= 0.6 {
-				total := 5.0
-				step := 360.0 / total
-				for i := 0.0; i < total; i++ {
-					for j := 0; j < 16; j++ {
-						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0).Add(randomVector(16.0)).Add(player.origin)
-						spawns = append(
-							spawns,
-							*NewReplicator(spawnPos.X, spawnPos.Y),
-						)
+		aim := player.origin.To(ui.mousePos)
+		gamepadAim := uiThumbstickVector(win, ui.currJoystick, pixelgl.AxisRightX, pixelgl.AxisRightY)
+
+		shooting := false
+		if gamepadAim.Len() > 0.3 {
+			shooting = true
+			aim = gamepadAim
+		}
+
+		// if win.JustPressed(uiActionActSelf) || win.JustPressed(pixelgl.KeySpace) {
+		// 	player.ReifyWard()
+		// }
+
+		timeSinceBullet := game.lastFrame.Sub(game.data.lastBullet).Seconds()
+		timeSinceAbleToShoot := timeSinceBullet - (game.data.weapon.fireRate / game.data.timescale)
+
+		if game.data.weapon != (weapondata{}) && timeSinceAbleToShoot >= 0 {
+			if game.data.mode == "menu_game" {
+				closest := 100000.0
+				closestEntity := pixel.Vec{}
+				for _, e := range game.data.entities {
+					if e.alive && !e.spawning && player.origin.To(e.origin).Len() < closest {
+						closestEntity = player.origin.To(e.origin)
+						closest = closestEntity.Len()
 					}
 				}
-			} else if r <= 0.64 {
-				total := 10.0
-				step := 360.0 / total
-				for i := 0.0; i < total; i++ {
-					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-					spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(550.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-					spawns = append(
-						spawns,
-						*NewSnek(spawnPos.X, spawnPos.Y),
-						*NewSnek(spawnPos2.X, spawnPos2.Y),
-					)
+				if closestEntity != (pixel.Vec{}) && closestEntity.Len() < 400 {
+					aim = closestEntity
+					shooting = true
 				}
-			} else if r <= 0.67 {
-				total := 4.0
-				step := 360.0 / total
-				for i := 0.0; i < total; i++ {
-					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(450.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-					spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-					spawns = append(
-						spawns,
-						*NewPinkSquare(spawnPos.X, spawnPos.Y),
-						*NewPinkSquare(spawnPos2.X, spawnPos2.Y),
-					)
+			} else if win.Pressed(uiActionShoot) || win.Pressed(pixelgl.KeyLeftSuper) {
+				shooting = true
+			}
+
+			if shooting {
+				// fmt.Printf("Bullet spawned %s", time.Now().String())
+				rad := math.Atan2(aim.Unit().Y, aim.Unit().X)
+
+				if game.data.weapon.conicAngle > 0 {
+					ang1 := rad + (game.data.weapon.conicAngle * math.Pi / 180)
+					ang2 := rad - (game.data.weapon.conicAngle * math.Pi / 180)
+					ang1Vec := pixel.V(math.Cos(ang1), math.Sin(ang1))
+					ang2Vec := pixel.V(math.Cos(ang2), math.Sin(ang2))
+
+					// I really shouldn't use these weird side effect functions lol
+					FireBullet(ang1Vec, game, player.origin, player)
+					FireBullet(ang2Vec, game, player.origin, player)
+					m := player.origin.Add(aim.Unit().Scaled(10))
+					FireBullet(aim, game, m, player)
+				} else if game.data.weapon.randomCone > 0 {
+					for i := 0; i < game.data.weapon.bulletCount; i++ {
+						off := (rand.Float64() * game.data.weapon.randomCone) - game.data.weapon.randomCone/2
+						ang := rad + (off * math.Pi / 180)
+						d := game.data.weapon.duration + (-(game.data.weapon.duration / 4.0) + (rand.Float64() * (game.data.weapon.duration / 2.0)))
+						game.data.newBullets = InlineAppendBullets(
+							game.data.newBullets,
+							*NewBullet(
+								player.origin.X,
+								player.origin.Y,
+								game.data.weapon.bulletSize,
+								game.data.weapon.velocity,
+								pixel.V(math.Cos(ang), math.Sin(ang)),
+								append([]string{}, player.elements...),
+								d,
+							),
+						)
+					}
+				} else {
+					FireBullet(aim, game, player.origin, player)
 				}
-			} else if r <= 0.75 {
-				for _, corner := range corners {
-					blackhole := NewBlackHole(
-						corner.X,
-						corner.Y,
-					)
-					snek := NewSnek(
-						corner.X,
-						corner.Y,
-					)
-					pink := NewPinkSquare(
-						corner.X,
-						corner.Y,
-					)
-					dodger := NewDodger(
-						corner.X,
-						corner.Y,
-					)
-					spawns = append(
-						spawns, *blackhole, *snek, *pink, *dodger,
-					)
+
+				// Reflective bullets procedure.
+				// Temporarily disabled.
+				// finalBullets := make([]bullet, 0)
+				// for i := 0; i < len(game.data.newBullets); i++ {
+				// 	b := game.data.newBullets[i]
+				// 	finalBullets = append(finalBullets, b)
+				// 	if game.data.weapon.reflective > 0 {
+				// 		ang := 360 / float64(game.data.weapon.reflective+1)
+
+				// 		for j := 1; j <= game.data.weapon.reflective; j++ {
+				// 			reflectiveAngle := b.data.orientation.Angle() + (float64(j) * ang * math.Pi / 180)
+				// 			reflectiveAngleVec := pixel.V(math.Cos(reflectiveAngle), math.Sin(reflectiveAngle))
+				// 			finalBullets = append(
+				// 				finalBullets,
+				// 				*NewBullet(
+				// 					b.data.origin.X,
+				// 					b.data.origin.Y,
+				// 					game.data.weapon.bulletSize,
+				// 					game.data.weapon.velocity,
+				// 					reflectiveAngleVec,
+				// 					append([]string{}, player.elements...),
+				// 					game.data.weapon.duration,
+				// 				),
+				// 			)
+				// 		}
+				// 	}
+				// }
+
+				bulletID := 0
+				for addedID, newBullet := range game.data.newBullets {
+					if newBullet.velocity == (pixel.Vec{}) {
+						continue
+					}
+
+					if len(game.data.bullets) < cap(game.data.bullets) {
+						game.data.bullets = append(game.data.bullets, newBullet)
+						game.data.newBullets[addedID] = bullet{}
+					} else {
+						for bulletID < len(game.data.bullets) {
+							existing := game.data.bullets[bulletID]
+							if (existing.velocity == pixel.Vec{}) {
+								game.data.bullets[bulletID] = newBullet
+								game.data.newBullets[addedID] = bullet{}
+								break
+							}
+							bulletID++
+						}
+					}
 				}
-			} else if r <= 0.85 {
-				total := 4.0
-				step := 360.0 / total
-				for i := 0.0; i < total; i++ {
-					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-					spawns = append(
-						spawns,
-						*NewBlackHole(spawnPos.X, spawnPos.Y),
-					)
+
+				overflow := timeSinceAbleToShoot * 1000
+				if overflow > game.data.weapon.fireRate {
+					overflow = 0
 				}
-			} else {
-				total := 14.0
-				step := 360.0 / total
-				for i := 0.0; i < total; i++ {
-					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-					spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(650.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-					spawns = append(
-						spawns,
-						*NewFollower(spawnPos.X, spawnPos.Y),
-						*NewFollower(spawnPos2.X, spawnPos2.Y),
-					)
+				game.data.lastBullet = game.lastFrame
+
+				shot := shotBuffer3.Streamer(0, shotBuffer3.Len())
+				volume := &effects.Volume{
+					Streamer: shot,
+					Base:     10,
+					Volume:   -1.3,
+					Silent:   false,
 				}
+
+				if game.data.weapon.bulletCount > 2 && game.data.weapon.conicAngle > 0 {
+					shot = shotBuffer4.Streamer(0, shotBuffer4.Len())
+					volume = &effects.Volume{
+						Streamer: shot,
+						Base:     10,
+						Volume:   -0.9,
+						Silent:   false,
+					}
+					speaker.Play(volume)
+				} else if game.data.weapon.conicAngle > 0 {
+					shot = shotBuffer2.Streamer(0, shotBuffer2.Len())
+					volume = &effects.Volume{
+						Streamer: shot,
+						Base:     10,
+						Volume:   -0.7,
+						Silent:   false,
+					}
+					speaker.Play(volume)
+				} else if game.data.weapon.bulletCount > 3 {
+					shot = shotBuffer.Streamer(0, shotBuffer.Len())
+					volume = &effects.Volume{
+						Streamer: shot,
+						Base:     10,
+						Volume:   -0.9,
+						Silent:   false,
+					}
+					speaker.Play(volume)
+				}
+				// speaker.Play(volume)
 			}
 		}
+		player.relativeTarget = aim.Unit()
 
-		// spawn entitites
-		PlaySpawnSounds(spawns)
-		game.data.spawns += len(spawns)
-		game.data.newEntities = InlineAppendEntities(game.data.newEntities, spawns...)
-		game.data.lastWave = last
-	}
+		// set velocities
+		closestEnemyDist := 1000000.0
+		for i, e := range game.data.entities {
+			if !e.alive {
+				continue
+			}
 
-	// for waveID, wave := range game.data.waves {
-	// 	if (wave.waveStart != time.Time{} && wave.waveEnd == time.Time{}) {
-	// 		if last.Sub(wave.waveStart).Seconds() >= wave.waveDuration { // If a wave has ended
-	// 			// End the wave
-	// 			fmt.Printf("[WaveEnd] %s\n", time.Now().String())
-	// 			wave.waveEnd = time.Now()
-	// 			wave.waveStart = time.Time{}
-	// 			game.data.waves[waveID] = wave
-	// 		} else if last.Sub(wave.waveStart).Seconds() < wave.waveDuration {
-	// 			// Continue wave
-	// 			// TODO make these data driven
-	// 			// waves would have spawn points, and spawn counts, and probably durations and stuff
-	// 			// hardcoded for now :D
+			if e.spawning {
+				if game.lastFrame.Sub(e.born).Seconds() >= e.spawnTime {
+					e.spawning = false
+					game.data.entities[i] = e
+				}
+				continue
+			}
 
-	// 			if last.Sub(wave.lastSpawn).Seconds() > wave.spawnFreq {
-	// 				// 4 spawn points
-	// 				points := [4]pixel.Vec{
-	// 					pixel.V(-(worldWidth/2)+32, -(worldHeight/2)+32),
-	// 					pixel.V(-(worldWidth/2)+32, (worldHeight/2)-32),
-	// 					pixel.V((worldWidth/2)-32, -(worldHeight/2)+32),
-	// 					pixel.V((worldWidth/2)-32, (worldHeight/2)-32),
-	// 				}
+			dir := pixel.ZV
+			toPlayer := e.origin.To(player.origin)
+			if player.alive {
+				dir = toPlayer.Unit()
+			}
+			if (e.entityType == "blackhole" || e.entityType == "bubble") && toPlayer.Len() < closestEnemyDist {
+				closestEnemyDist = toPlayer.Len()
+			}
+			if e.entityType == "wanderer" {
+				if e.target.Len() == 0 || e.origin.To(e.target).Len() < 5.0 {
+					poi := pixel.V(
+						(rand.Float64()*worldWidth)-worldWidth/2.0,
+						(rand.Float64()*worldHeight)-worldHeight/2.0,
+					)
+					e.target = e.origin.Sub(poi).Unit().Scaled(rand.Float64() * 400)
+				}
+				e.orientation = e.orientation.Rotated(60 * math.Pi / 180 * dt).Unit()
+				dir = e.origin.To(e.target).Unit()
+			} else if e.entityType == "dodger" {
+				// https://gamedev.stackexchange.com/questions/109513/how-to-find-if-an-object-is-facing-another-object-given-position-and-direction-a
+				// todo, tidy up and put somewhere
+				e.orientation = player.origin
+				currentlyDodgingDist := -1.0
+				for _, b := range game.data.bullets {
+					if (len(b.data.elements) > 0 && b.data.elements[0] == "wind") || (len(b.data.elements) > 1 && b.data.elements[1] == "wind") {
+						continue
+					}
+					if !b.data.alive {
+						continue
+					}
+					entToBullet := e.origin.Sub(b.data.origin)
+					if entToBullet.Len() > 200 {
+						continue
+					}
+					entToBullet = entToBullet.Unit()
+					facing := entToBullet.Dot(b.data.orientation.Unit())
 
-	// 				spawns := make([]entityData, 100)
-	// 				for _, p := range points {
-	// 					var enemy *entityData
-	// 					if wave.entityType == "follower" { // dictionary lookup?
-	// 						enemy = NewFollower(
-	// 							p.X,
-	// 							p.Y,
-	// 						)
-	// 					} else if wave.entityType == "dodger" {
-	// 						enemy = NewDodger(
-	// 							p.X,
-	// 							p.Y,
-	// 						)
-	// 					} else if wave.entityType == "pink" {
-	// 						enemy = NewPinkSquare(
-	// 							p.X,
-	// 							p.Y,
-	// 						)
-	// 					} else if wave.entityType == "replicator" {
-	// 						enemy = NewReplicator(
-	// 							p.X,
-	// 							p.Y,
-	// 						)
-	// 					}
-	// 					spawns = append(spawns, *enemy)
-	// 				}
+					isClosest := (currentlyDodgingDist == -1.0 || entToBullet.Len() < currentlyDodgingDist)
+					if facing > 0.0 && facing > 0.7 && facing < 0.95 && isClosest { // if it's basically dead on, they'll die.
+						currentlyDodgingDist = entToBullet.Len()
 
-	// 				PlaySpawnSounds(spawns)
-	// 				game.data.entities = append(game.data.entities, spawns...)
-	// 				game.data.spawns += len(spawns)
-	// 				wave.lastSpawn = time.Now()
-	// 				game.data.waves[waveID] = wave
-	// 			}
-	// 		}
-	// 	}
-	// }
+						if g_debug {
+							game.debugInfos = append(game.debugInfos, debugInfo{p1: e.origin, p2: b.data.origin})
+						}
 
-	// adjust game rules
+						baseVelocity := entToBullet.Unit().Scaled(-4 * game.data.timescale)
 
-	if game.data.score >= game.data.lifeReward {
-		game.data.lifeReward += game.data.lifeReward
-		game.data.lives++
-		sound := lifeBuffer.Streamer(0, lifeBuffer.Len())
-		volume := &effects.Volume{
-			Streamer: sound,
-			Base:     10,
-			Volume:   -0.9,
-			Silent:   false,
+						midColor := pixel.ToRGBA(e.color)
+						pos1 := pixel.V(1, 1).Rotated(e.orientation.Angle()).Scaled(e.radius).Add(e.origin)
+						pos2 := pixel.V(-1, 1).Rotated(e.orientation.Angle()).Scaled(e.radius).Add(e.origin)
+						pos3 := pixel.V(1, -1).Rotated(e.orientation.Angle()).Scaled(e.radius).Add(e.origin)
+						pos4 := pixel.V(-1, -1).Rotated(e.orientation.Angle()).Scaled(e.radius).Add(e.origin)
+						game.data.newParticles = InlineAppendParticles(
+							game.data.newParticles,
+							NewParticle(pos1.X, pos1.Y, midColor, 48.0, pixel.V(0.5, 1.0), 0.0, baseVelocity.Scaled(rand.Float64()*2.0), 1.0, "ship"),
+							NewParticle(pos2.X, pos1.Y, midColor, 48.0, pixel.V(0.5, 1.0), 0.0, baseVelocity.Scaled(rand.Float64()*2.0), 1.0, "ship"),
+							NewParticle(pos3.X, pos1.Y, midColor, 48.0, pixel.V(0.5, 1.0), 0.0, baseVelocity.Scaled(rand.Float64()*2.0), 1.0, "ship"),
+							NewParticle(pos4.X, pos1.Y, midColor, 48.0, pixel.V(0.5, 1.0), 0.0, baseVelocity.Scaled(rand.Float64()*2.0), 1.0, "ship"),
+						)
+
+						dir = e.origin.Sub(b.data.origin).Scaled(4)
+					}
+				}
+			} else if e.entityType == "pink" {
+				e.orientation = player.origin
+			} else if e.entityType == "snek" {
+				t := math.Mod(game.lastFrame.Sub(e.born).Seconds(), 2.0)
+				deg := (math.Sin(t*math.Pi) * e.cone) * math.Pi / 180.0
+				dir = dir.Rotated(deg)
+				if t > 1.9 {
+					e.cone = 60.0 + (rand.Float64() * 90.0)
+				}
+			} else if e.entityType == "gate" {
+				if e.target.Len() == 0 || e.origin.To(e.target).Len() < 5.0 {
+					poi := pixel.V(
+						(rand.Float64()*worldWidth)-worldWidth/2.0,
+						(rand.Float64()*worldHeight)-worldHeight/2.0,
+					)
+					e.target = e.origin.Sub(poi).Unit().Scaled(rand.Float64() * 400)
+				}
+				e.orientation = e.orientation.Rotated(7 * math.Pi / 180 * dt).Unit()
+				dir = e.origin.To(e.target).Unit()
+			}
+			e.Propel(dir, dt)
+
+			game.data.entities[i] = e
 		}
-		speaker.Play(volume)
-	}
+		game.data.timescale = math.Max(0.1, math.Min(256, closestEnemyDist)/256.0)
 
-	if game.data.score >= game.data.bombReward {
-		game.data.bombReward += game.data.bombReward
-		game.data.bombs++
-	}
+		for i, b := range game.data.bullets {
+			if !b.data.alive {
+				game.data.bullets[i] = bullet{}
+				continue
+			}
+			b.data.origin = b.data.origin.Add(b.velocity.Scaled(dt))
+			if game.data.weapon.randomCone == 0 {
+				if game.data.weapon.bulletCount > 2 {
+					if math.Mod(game.totalTime, 0.4) < 0.8 {
+						game.grid.ApplyExplosiveForce(b.velocity.Scaled(dt).Len()*1.25, Vector3{b.data.origin.X, b.data.origin.Y, 0.0}, 60.0)
+					}
+				} else {
+					game.grid.ApplyDirectedForce(Vector3{b.velocity.X * dt * 0.05, b.velocity.Y * dt * 0.05, 0.0}, Vector3{b.data.origin.X, b.data.origin.Y, 0.0}, 40.0)
+				}
+			}
 
-	if game.data.killsSinceBorn >= game.data.multiplierReward && game.data.scoreMultiplier < 10 {
-		game.data.scoreMultiplier++
-		game.data.multiplierReward *= 2
-		buffer := multiplierSounds[game.data.scoreMultiplier]
-		sound := buffer.Streamer(0, buffer.Len())
-		volume := &effects.Volume{
-			Streamer: sound,
-			Base:     10,
-			Volume:   -0.6,
-			Silent:   false,
-		}
-		speaker.Play(volume)
-	}
-
-	// weapon upgrading doesn't seem relevant anymore
-	// timeToUpgrade := game.data.score >= 10000 && game.data.lastWeaponUpgrade == time.Time{}
-	// if timeToUpgrade || (game.data.lastWeaponUpgrade != time.Time{} && last.Sub(game.data.lastWeaponUpgrade).Seconds() >= game.data.weaponUpgradeFreq) {
-	// 	fmt.Printf("[UpgradingWeapon]\n")
-	// 	game.data.lastWeaponUpgrade = time.Now()
-	// 	switch rand.Intn(2) {
-	// 	case 0:
-	// 		game.data.weapon = *NewBurstWeapon()
-	// 	case 1:
-	// 		game.data.weapon = *NewConicWeapon()
-	// 	}
-	// }
-
-}
-
-func (game *game) pacifismGameModeUpdate(debug bool, last time.Time, totalTime float64, player *entityData) {
-	// ambient spawns
-	if !debug && last.Sub(game.data.lastSpawn).Seconds() > game.data.AmbientSpawnFreq() && game.data.spawning {
-		// spawn
-		spawns := make([]entityData, 0, game.data.spawnCount)
-		corners := [4]pixel.Vec{
-			pixel.V(-(worldWidth/2)+160, -(worldHeight/2)+160),
-			pixel.V(-(worldWidth/2)+160, (worldHeight/2)-160),
-			pixel.V((worldWidth/2)-160, -(worldHeight/2)+160),
-			pixel.V((worldWidth/2)-160, (worldHeight/2)-160),
+			game.data.bullets[i] = b
 		}
 
-		pos := corners[rand.Intn(4)]
-		// to regulate distance from player
-		for pos.Sub(player.origin).Len() < 350 {
-			pos = corners[rand.Intn(4)]
-		}
-		for i := 0; i < game.data.spawnCount; i++ {
-			sPos := pos.Add(pixel.V((rand.Float64()*200.0)-100.0, (rand.Float64()*200.0)-100.0))
-			enemy := *NewFollower(sPos.X, sPos.Y)
-			spawns = append(spawns, enemy)
+		// Process blackholes
+		// I don't really care about efficiency atm
+		for eID, e := range game.data.entities {
+			e.pullVec = pixel.ZV // reset the pull vec (which is used for drawing effects related to the pull)
+			game.data.entities[eID] = e
 		}
 
-		gateCount := game.data.spawnCount / 8
-		if gateCount < 1 {
-			gateCount = 1
+		for bID, b := range game.data.entities {
+			if !b.alive || b.entityType != "blackhole" || !b.active {
+				continue
+			}
+
+			// emit particles
+			if (uint64(game.totalTime*1000)/125)%2 == 0 {
+				v := 6.0 + (rand.Float64() * 12)
+				sprayVelocity := pixel.V(
+					math.Cos(b.particleEmissionAngle),
+					math.Sin(b.particleEmissionAngle),
+				).Unit().Scaled(v * game.data.timescale)
+
+				color := colornames.Lightskyblue
+				pos := b.origin
+				game.data.newParticles = InlineAppendParticles(
+					game.data.newParticles,
+					NewParticle(pos.X,
+						pos.Y,
+						pixel.ToRGBA(color),
+						128.0,
+						pixel.V(1.5, 1.5),
+						0.0,
+						sprayVelocity,
+						2.0,
+						"blackhole",
+					),
+				)
+
+				b.particleEmissionAngle -= math.Pi / 25.0
+			}
+
+			if b.hp > 15 {
+				game.grid.ApplyExplosiveForce(b.radius*5, Vector3{b.origin.X, b.origin.Y, 0.0}, b.radius*5)
+				// game.grid.ApplyDirectedForce(Vector3{b.origin.X, b.origin.Y, 20.0}, Vector3{b.origin.X, b.origin.Y, 0.0}, 20)
+				b.alive = false
+				// spawn bubbles
+				for i := 0; i < 5; i++ {
+					pos := pixel.V(
+						rand.Float64()*200,
+						rand.Float64()*200,
+					).Add(b.origin)
+					pleb := *NewAngryBubble(pos.X, pos.Y)
+					game.data.newEntities = InlineAppendEntities(game.data.newEntities, pleb)
+				}
+				game.data.entities[bID] = b
+
+				for i := 0; i < 1024; i++ {
+					extra := (1.0 / ((rand.Float64() * 10.0) + 1.0))
+					speed := 32 * (1.0 - extra)
+
+					p := NewParticle(
+						b.origin.X,
+						b.origin.Y,
+						pixel.ToRGBA(colornames.Deepskyblue).Add(pixel.Alpha(extra*3)),
+						64,
+						pixel.V(1.0, 1.0),
+						0.0,
+						randomVector(speed),
+						3.0,
+						"enemy",
+					)
+
+					game.data.newParticles = InlineAppendParticles(game.data.newParticles, p)
+				}
+
+				continue
+			}
+
+			maxForce := 2400.0
+
+			game.grid.ApplyImplosiveForce(5+b.radius, Vector3{b.origin.X, b.origin.Y, 0.0}, 50+b.radius)
+
+			dist := player.origin.Sub(b.origin)
+			length := dist.Len()
+			if length <= 300.0 {
+				force := pixel.Lerp(
+					dist.Unit().Scaled(maxForce),
+					pixel.ZV,
+					length/300.0,
+				)
+				player.velocity = player.velocity.Sub(force.Scaled(dt))
+
+				if g_debug {
+					game.debugInfos = append(game.debugInfos, debugInfo{
+						p1: player.origin,
+						p2: player.origin.Sub(force.Scaled(dt * 10)),
+					})
+				}
+			}
+
+			for pID, p := range game.data.particles {
+				if p == (particle{}) {
+					continue
+				}
+
+				dist := b.origin.Sub(p.origin)
+				length := dist.Len()
+
+				n := dist.Unit()
+				p.velocity = p.velocity.Add(n.Scaled(10000.0 / ((length * length) + 10000.0)))
+
+				if length < 400 {
+					p.velocity = p.velocity.Add(pixel.V(n.Y, -n.X).Scaled(45 / (length + 250.0)))
+				}
+				game.data.particles[pID] = p
+			}
+
+			for bulletID, bul := range game.data.bullets {
+				if bul.data.alive {
+					dist := bul.data.origin.Sub(b.origin)
+					length := dist.Len()
+					if length > 300.0 {
+						continue
+					}
+					n := dist.Unit()
+					// bul.velocity = bul.velocity.Add(dist.Scaled(0.2))
+					push1 := bul.velocity.Add(pixel.V(n.Y, -n.X).Scaled(length * 0.1))
+					push2 := bul.velocity.Add(pixel.V(-n.Y, n.X).Scaled(length * 0.1))
+
+					pushed := push1
+					if bul.data.origin.Add(push2).Sub(b.origin).Len() > bul.data.origin.Add(push1).Sub(b.origin).Len() {
+						pushed = push2
+					}
+					bul.velocity = pushed // either way rather than 1 way!
+					game.data.bullets[bulletID] = bul
+				}
+			}
+
+			for eID, e := range game.data.entities {
+				if e.alive && !e.spawning && eID != bID {
+					dist := b.origin.Sub(e.origin)
+					length := dist.Len()
+					if length > 300.0 {
+						continue
+					}
+
+					n := dist.Unit()
+
+					force := pixel.Lerp(
+						n.Scaled(maxForce*2.4), // maximum force at close distance
+						pixel.ZV,               // scale down to zero at maximum distance
+						length/300.0,           // at max distance, 1.0, = pixel.ZV
+					)
+					// force = force.Add(pixel.V(n.Y, -n.X).Scaled(force.Len() * 0.5)) // add a bit of orbital force
+
+					e.velocity = e.velocity.Add(force.Scaled(dt))
+					e.pullVec = e.pullVec.Add(force.Scaled(dt))
+
+					if g_debug {
+						game.debugInfos = append(game.debugInfos, debugInfo{
+							p1: e.origin,
+							p2: e.origin.Add(force.Scaled(dt * 10)),
+						})
+					}
+
+					intersection := pixel.C(b.origin, b.radius+8.0).Intersect(e.Circle())
+					if intersection.Radius > 5.0 && e.entityType != "blackhole" {
+						b.hp += e.hp // Blackhole grows stronger
+						b.bounty += e.bounty
+						e.alive = false
+					}
+					game.data.entities[eID] = e
+				}
+			}
+
+			game.data.entities[bID] = b
 		}
-		for i := 0; i < gateCount; i++ {
-			pos = pixel.V(
-				float64(rand.Intn(worldWidth)-worldWidth/2),
-				float64(rand.Intn(worldHeight)-worldHeight/2),
-			)
-			// to regulate distance from player
-			for pos.Sub(player.origin).Len() < 350 {
-				pos = pixel.V(
-					float64(rand.Intn(worldWidth)-worldWidth/2),
-					float64(rand.Intn(worldHeight)-worldHeight/2),
+
+		for _, e := range game.data.entities {
+			baseVelocity := e.pullVec.Scaled(0.05)
+
+			if e.pullVec.Len() > 0 && e.color != nil {
+				midColor := pixel.ToRGBA(e.color)
+				pos1 := pixel.V(1, 1).Rotated(e.orientation.Angle()).Scaled(e.radius).Add(e.origin)
+				pos2 := pixel.V(-1, 1).Rotated(e.orientation.Angle()).Scaled(e.radius).Add(e.origin)
+				pos3 := pixel.V(1, -1).Rotated(e.orientation.Angle()).Scaled(e.radius).Add(e.origin)
+				pos4 := pixel.V(-1, -1).Rotated(e.orientation.Angle()).Scaled(e.radius).Add(e.origin)
+				game.data.newParticles = InlineAppendParticles(
+					game.data.newParticles,
+					NewParticle(pos1.X, pos1.Y, midColor, 48.0, pixel.V(0.5, 1.0), 0.0, baseVelocity.Scaled(rand.Float64()*2.0), 1.0, "enemy"),
+					NewParticle(pos2.X, pos1.Y, midColor, 48.0, pixel.V(0.5, 1.0), 0.0, baseVelocity.Scaled(rand.Float64()*2.0), 1.0, "enemy"),
+					NewParticle(pos3.X, pos1.Y, midColor, 48.0, pixel.V(0.5, 1.0), 0.0, baseVelocity.Scaled(rand.Float64()*2.0), 1.0, "enemy"),
+					NewParticle(pos4.X, pos1.Y, midColor, 48.0, pixel.V(0.5, 1.0), 0.0, baseVelocity.Scaled(rand.Float64()*2.0), 1.0, "enemy"),
 				)
 			}
-			spawns = append(spawns, *NewGate(pos.X, pos.Y))
 		}
 
-		PlaySpawnSounds(spawns)
-		game.data.newEntities = InlineAppendEntities(game.data.newEntities, spawns...)
-		game.data.spawns += len(spawns)
-		game.data.lastSpawn = time.Now()
+		game.grid.Update()
 
-		if game.data.spawns%10 == 0 && game.data.spawnCount < 40 {
-			game.data.spawnCount++
+		// Apply velocities
+		// player.origin = player.origin.Add(player.velocity.Scaled(dt))
+
+		for i, e := range game.data.entities {
+			if !e.alive && !e.spawning {
+				continue
+			}
+			if g_debug && win.JustPressed(pixelgl.MouseButton1) {
+				e.selected = e.Circle().Intersect(pixel.C(ui.mousePos, 4)).Radius > 0
+				if e.entityType == "snek" {
+					for tID, snekT := range e.tail {
+						snekT.selected = snekT.Circle().Intersect(pixel.C(ui.mousePos, 4)).Radius > 0
+						e.tail[tID] = snekT
+					}
+				}
+			}
+
+			// if e.entityType == "gate" {
+			// 	if math.Mod(totalTime, 0.05) < 0.02 {
+			// 		game.grid.ApplyExplosiveForce(5, Vector3{e.origin.X, e.origin.Y, 0.0}, 200)
+			// 	}
+			// }
+
+			e.Update(dt, game.totalTime, game.lastFrame)
+			game.data.entities[i] = e
 		}
 
-		if game.data.spawns%20 == 0 {
-			if game.data.ambientSpawnFreq > 1 {
-				game.data.ambientSpawnFreq -= 0.25
+		// check for collisions
+		if game.data.mode != "story" {
+			player.enforceWorldBoundary(false)
+		}
+
+		for id, a := range game.data.entities {
+			//tmpTarget.Push(e.origin.Add(e.orientation.Scaled(e.radius)), e.origin.Add(e.orientation.Scaled(-e.radius)))
+			ignoreList := []string{"pinkpleb", "snek", "gate"}
+			if sliceextra.Contains(ignoreList, a.entityType) {
+				continue
+			}
+			for id2, b := range game.data.entities {
+				if id == id2 || sliceextra.Contains(ignoreList, a.entityType) || a.entityType != b.entityType {
+					continue
+				}
+
+				intersection := a.MovementCollisionCircle().Intersect(b.MovementCollisionCircle())
+				if intersection.Radius > 0 {
+					a.origin = a.origin.Add(
+						b.origin.To(a.origin).Unit().Scaled(intersection.Radius * dt),
+					)
+					game.data.entities[id] = a
+				}
 			}
 		}
-	}
-}
 
-func (game *game) respawnPlayer() {
-	game.data.respawnPlayer()
-	game.data.multiplierReward = 25 // kills
+		for bID, b := range game.data.bullets {
+			if b.data.alive {
+				for eID, e := range game.data.entities {
+					if e.alive && !e.spawning && b.data.Circle().Intersect(e.Circle()).Radius > 0 {
+						b.DealDamage(
+							&e,
+							bID,
+							1,
+							game.lastFrame,
+							game,
+							player,
+						)
+
+						if e.entityType == "blackhole" {
+							hitSound := blackholeHitBuffer.Streamer(0, blackholeHitBuffer.Len())
+							volume := &effects.Volume{
+								Streamer: hitSound,
+								Base:     10,
+								Volume:   -0.9,
+								Silent:   false,
+							}
+							speaker.Play(volume)
+						}
+						e.DealDamage(
+							&b.data,
+							eID,
+							1,
+							game.lastFrame,
+							game,
+							player,
+						)
+
+						game.data.entities[eID] = e
+						break
+					} else if e.alive && !e.spawning && e.entityType == "snek" {
+						for _, t := range e.tail {
+							if t.entityType == "snektail" && b.data.Circle().Intersect(t.Circle()).Radius > 0 {
+								b.data.alive = false
+								game.data.bullets[bID] = b
+								break
+							}
+						}
+					}
+				}
+				if !pixel.R(-worldWidth/2, -worldHeight/2, worldWidth/2, worldHeight/2).Contains(b.data.origin) {
+
+					// explode bullets when they hit the edge
+					for i := 0; i < 30; i++ {
+						p := NewParticle(
+							b.data.origin.X,
+							b.data.origin.Y,
+							pixel.ToRGBA(colornames.Lightblue),
+							32,
+							pixel.V(1.0, 1.0),
+							0.0,
+							randomVector(5.0),
+							1.0,
+							"bullet",
+						)
+						game.data.newParticles = InlineAppendParticles(game.data.newParticles, p)
+					}
+
+					b.data.alive = false
+					game.data.bullets[bID] = b
+				}
+			}
+		}
+
+		for eID, e := range game.data.entities {
+			intersectionTest := e.Circle().Intersect(player.Circle()).Radius > 0
+
+			if e.entityType == "gate" {
+				l := pixel.L(e.origin.Add(e.orientation.Scaled(e.radius)), e.origin.Add(e.orientation.Scaled(-e.radius)))
+				intersectionTest = l.IntersectCircle(player.Circle()).Len() > 0
+			}
+
+			if player.alive && e.alive && !e.spawning && intersectionTest {
+				e.IntersectWithPlayer(
+					e,
+					eID,
+					game,
+					player,
+					game.lastFrame,
+				)
+			}
+		}
+
+		if len(player.elements) > 0 {
+			SetDefaultPlayerSpeed(player)
+			game.data.weapon = *NewWeaponData()
+
+			// inclusion checks
+			for _, el := range player.elements {
+				if el == "water" || el == "spirit" {
+					game.data.weapon.bulletCount = 1
+				} else if el == "fire" {
+					game.data.weapon.bulletCount = 4
+					game.data.weapon.duration = 0.25
+					game.data.weapon.fireRate = 0.05
+					game.data.weapon.randomCone = 12
+				}
+			}
+
+			// cumulative effects
+			for i := 0; i < len(player.elements); i++ {
+				// todo: give each element a damage type.
+				// this would give extra HP to the bullet when it hits shapes of its damage type, allowing them to penetrate more
+
+				el := player.elements[i]
+				if el == "wind" {
+					game.data.weapon.bulletCount = game.data.weapon.bulletCount + 3
+					game.data.weapon.duration = game.data.weapon.duration + 0.2
+					// allows bullets to not be dodged by dodgers
+					// be more data driven than this
+					// SetBoosting(player) -> todo make this a spell
+
+					// game.data.weapon.bulletCount = game.data.weapon.bulletCount + 1
+				} else if el == "water" {
+					game.data.weapon.conicAngle = game.data.weapon.conicAngle + 3
+					game.data.weapon.velocity = game.data.weapon.velocity + 100
+
+					// takes precedence over fire
+					game.data.weapon.fireRate = math.Max(0.13, game.data.weapon.fireRate-0.03)
+					game.data.weapon.duration = 5.0
+					if game.data.weapon.randomCone > 0 {
+						game.data.weapon.randomCone = 0
+						game.data.weapon.bulletCount = 2
+					}
+				} else if el == "fire" {
+					game.data.weapon.velocity = game.data.weapon.velocity + 100
+					game.data.weapon.duration = game.data.weapon.duration + 0.125
+
+					if game.data.weapon.conicAngle == 0 {
+						game.data.weapon.randomCone = game.data.weapon.randomCone + 8
+						game.data.weapon.bulletCount = game.data.weapon.bulletCount + 3
+					}
+				} else if el == "spirit" {
+					game.data.weapon.velocity = game.data.weapon.velocity + 600
+					game.data.weapon.bulletSize = game.data.weapon.bulletSize + 6
+					game.data.weapon.conicAngle = game.data.weapon.conicAngle + 1
+
+					// takes precedence over fire
+					game.data.weapon.duration = 5.0
+					game.data.weapon.fireRate = math.Max(0.144, game.data.weapon.fireRate-0.03)
+					if game.data.weapon.randomCone > 0 {
+						game.data.weapon.randomCone = 0
+						game.data.weapon.bulletCount = 2
+					}
+				} else if el == "lightning" {
+					game.data.weapon.fireRate = game.data.weapon.fireRate - 0.03
+					game.data.weapon.duration = game.data.weapon.duration + 0.125
+				} else if el == "chaos" {
+					game.data.weapon.reflective = game.data.weapon.reflective + 1
+					game.data.weapon.conicAngle = game.data.weapon.conicAngle + 2
+					game.data.weapon.fireRate = game.data.weapon.fireRate - 0.02
+					game.data.weapon.duration = game.data.weapon.duration + 0.125
+				}
+			}
+			if game.data.weapon.randomCone > 0 {
+				game.data.weapon.randomCone = game.data.weapon.randomCone + game.data.weapon.conicAngle
+				game.data.weapon.conicAngle = 0
+			}
+
+			if win.JustPressed(uiActionAct) {
+				// possible ways this could work:
+				// ward elements could have passive effects, OR not.
+				// I'm toying around with passive effects, and activation effects (which destroy the ward, thus removing the passive effects)
+				// two kinds of activations: internal (probably defensive) and external (probably offensive)
+				//end
+				game.data.weapon = *NewWeaponData()
+				player.elements = make([]string, 0)
+			}
+		}
+
+		// check for bomb here for now
+		bombPressed := win.Pressed(pixelgl.KeySpace) || win.JoystickAxis(ui.currJoystick, pixelgl.AxisRightTrigger) > 0.1
+		// game.data.bombs > 0 &&
+		// droppping bomb concept for the moment
+		if len(player.elements) > 0 && bombPressed && game.lastFrame.Sub(game.data.lastBomb).Seconds() > 3.0 {
+			game.grid.ApplyExplosiveForce(256.0, Vector3{player.origin.X, player.origin.Y, 0.0}, 256.0)
+			sound := bombBuffer.Streamer(0, bombBuffer.Len())
+			volume := &effects.Volume{
+				Streamer: sound,
+				Base:     10,
+				Volume:   0.7,
+				Silent:   false,
+			}
+			speaker.Play(volume)
+
+			for i := 0; i < 1000; i++ {
+				speed := 48.0 * (1.0 - 1/((rand.Float64()*32.0)+1))
+				col := int(rand.Float32() * float32(len(player.elements)))
+				p := NewParticle(
+					player.origin.X,
+					player.origin.Y,
+					pixel.ToRGBA(elements[player.elements[col]]),
+					100,
+					pixel.V(1.5, 1.5),
+					0.0,
+					randomVector(speed),
+					2.0,
+					"player",
+				)
+				game.data.newParticles = InlineAppendParticles(game.data.newParticles, p)
+			}
+
+			game.data.lastBomb = time.Now()
+
+			game.data.bombs--
+			for eID, e := range game.data.entities {
+				e.alive = false
+				e.death = game.lastFrame
+				e.expiry = game.lastFrame
+				game.data.entities[eID] = e
+			}
+
+			player.elements = make([]string, 0)
+		}
+
+		// Keep buffered particles ticking so they don't stack up too much
+		for pID, p := range game.data.newParticles {
+			p.percentLife -= 1.0 / p.duration
+			game.data.newParticles[pID] = p
+		}
+		for pID, p := range game.data.particles {
+			if p != (particle{}) {
+				p.origin = p.origin.Add(p.velocity)
+
+				minX := -worldWidth / 2
+				minY := -worldHeight / 2
+				maxX := worldWidth / 2
+				maxY := worldHeight / 2
+				// collide with the edges of the screen
+				if p.origin.X < minX {
+					p.origin.X = minX
+					p.velocity.X = math.Abs(p.velocity.X)
+				} else if p.origin.X > maxX {
+					p.origin.X = maxX
+					p.velocity.X = -math.Abs(p.velocity.X)
+				}
+				if p.origin.Y < minY {
+					p.origin.Y = minY
+					p.velocity.Y = math.Abs(p.velocity.Y)
+				} else if p.origin.Y > maxY {
+					p.origin.Y = maxY
+					p.velocity.Y = -math.Abs(p.velocity.Y)
+				}
+
+				p.orientation = p.velocity.Angle()
+
+				p.percentLife -= 1.0 / p.duration
+
+				speed := p.velocity.Len()
+				alpha := math.Min(1, math.Min(p.percentLife*2, speed*1.0))
+				alpha *= alpha
+				p.colour.A = alpha
+				p.scale.X = p.lengthMultiplier * math.Min(math.Min(1.0, 0.2*speed+0.1), alpha)
+
+				if math.Abs(p.velocity.X)+math.Abs(p.velocity.Y) < 0.00000001 {
+					p.velocity = pixel.ZV
+				}
+
+				p.velocity = p.velocity.Scaled(0.97)
+
+				game.data.particles[pID] = p
+			}
+		}
+
+		// kill particles
+		killedParticles := 0
+		for particleID, existing := range game.data.newParticles {
+			if (existing != particle{}) && existing.percentLife <= 0 {
+				game.data.newParticles[particleID] = particle{}
+			}
+		}
+		for particleID, existing := range game.data.particles {
+			if (existing != particle{}) && existing.percentLife <= 0 {
+				game.data.particles[particleID] = particle{}
+				killedParticles++
+			}
+		}
+		killedEnt := 0
+		for entID, existing := range game.data.entities {
+			if (!existing.alive && existing.born != time.Time{}) || (existing.expiry != time.Time{}) && game.lastFrame.After(existing.expiry) {
+				game.data.entities[entID] = entityData{}
+				killedEnt++
+			} // kill entities
+		}
+		// fmt.Printf("Killed\t(%d entities)\t(%d particles)\n", killedEnt, killedParticles)
+
+		particleID := 0
+		for addedID, newParticle := range game.data.newParticles {
+			if newParticle != (particle{}) {
+				if len(game.data.particles) < cap(game.data.particles) {
+					game.data.particles = append(game.data.particles, newParticle)
+					game.data.newParticles[addedID] = particle{}
+				} else {
+					for particleID < len(game.data.particles) {
+						existing := game.data.particles[particleID]
+						if existing == (particle{}) {
+							game.data.particles[particleID] = newParticle
+							game.data.newParticles[addedID] = particle{}
+							break
+						}
+						particleID++
+					}
+				}
+			}
+		}
+
+		entID := 0
+		toSpawn := 0
+		spawnedEnt := 0
+		for addedID, newEnt := range game.data.newEntities {
+			if newEnt.entityType != "" {
+				toSpawn++
+				if len(game.data.entities) < cap(game.data.entities) {
+					game.data.entities = append(game.data.entities, newEnt)
+					game.data.newEntities[addedID] = entityData{}
+					spawnedEnt++
+					entID++
+				} else {
+					for entID < len(game.data.entities) {
+						existing := game.data.entities[entID]
+						if existing.origin == (pixel.Vec{}) {
+							game.data.entities[entID] = newEnt
+							game.data.newEntities[addedID] = entityData{}
+							spawnedEnt++
+							break
+						}
+						entID++
+					}
+				}
+			}
+		} // bring in new entities
+		// fmt.Printf("Killed: %d	To Spawn: %d	Spawned: %d\n", killedEnt, toSpawn, spawnedEnt)
+
+		// kill bullets
+		for bID, b := range game.data.bullets {
+			if !b.data.alive && time.Now().After(b.data.born.Add(time.Duration(b.duration*1000)*time.Millisecond)) {
+				game.data.bullets[bID] = bullet{}
+			}
+		}
+
+		if game.data.mode == "evolved" || game.data.mode == "menu_game" {
+			game.evolvedGameModeUpdate(g_debug, game.lastFrame, game.totalTime, player)
+		} else if game.data.mode == "pacifism" {
+			game.pacifismGameModeUpdate(g_debug, game.lastFrame, game.totalTime, player)
+		}
+	}
+
 }
