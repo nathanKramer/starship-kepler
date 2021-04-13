@@ -21,6 +21,8 @@ var chapter1 = chapter{
 			"Inconceivable abstractions, made real...",
 			"Hulking, infinitesemal, fractal, eldritch, sublime...",
 		}},
-		{lines: []string{"What I would give to share this with someone."}},
+		{lines: []string{
+			"Beautiful and terrifying in equal measure",
+		}},
 	},
 }

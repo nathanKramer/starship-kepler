@@ -120,6 +120,10 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 		menuChange := uiChangeSelection(win, uiGamePadDir, game.lastFrame, game.lastMenuChoiceTime)
 		if menuChange != 0 {
 			game.menu.selection = (game.menu.selection + menuChange) % len(game.menu.options)
+			if game.menu.selection < 0 {
+				// would have thought modulo would handle negatives. /shrug
+				game.menu.selection += len(game.menu.options)
+			}
 			for (implemented > 0) && !sliceextra.Contains(implementedMenuItems, game.menu.options[game.menu.selection]) {
 				game.menu.selection = (game.menu.selection + menuChange) % len(game.menu.options)
 				if game.menu.selection < 0 {
@@ -137,12 +141,6 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 			PlayMenuMusic()
 			game.menu = NewMainMenu()
 			game.data = *NewMenuGame()
-		}
-	}
-
-	if game.state == "paused" {
-		if playerCancelled {
-			game.state = "playing"
 		}
 	}
 
@@ -176,7 +174,12 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 	}
 
 	direction := pixel.ZV
-	if game.state == "playing" {
+
+	if game.state == "paused" {
+		if playerCancelled {
+			game.state = "playing"
+		}
+	} else if game.state == "playing" {
 		if !player.alive {
 			game.respawnPlayer()
 			game.grid.ApplyDirectedForce(Vector3{0.0, 0.0, 1400.0}, Vector3{player.origin.X, player.origin.Y, 0.0}, 80)

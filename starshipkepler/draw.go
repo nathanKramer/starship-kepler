@@ -223,6 +223,29 @@ func drawBullet(bullet *entityData, d *imdraw.IMDraw) {
 	}
 }
 
+func drawMenu(d *DrawContext, menu *menu) {
+	for _, item := range menu.options {
+		if sliceextra.Contains(implementedMenuItems, item) {
+			d.centeredTxt.Color = colornames.White
+		} else {
+			d.centeredTxt.Color = colornames.Grey
+		}
+		if item == menu.options[menu.selection] {
+			d.centeredTxt.Color = colornames.Deepskyblue
+			d.imd.Push(
+				d.centeredTxt.Dot.Add(
+					pixel.V(
+						-8.0,
+						(d.centeredTxt.LineHeight/2.0)-4.0,
+					),
+				),
+			)
+			d.imd.Circle(2.0, 4.0)
+		}
+		fmt.Fprintln(d.centeredTxt, item)
+	}
+}
+
 func DrawGame(win *pixelgl.Window, game *game, d *DrawContext) {
 	d.imd.Reset()
 	d.uiDraw.Reset()
@@ -878,13 +901,7 @@ func DrawGame(win *pixelgl.Window, game *game, d *DrawContext) {
 
 			d.centeredTxt.Orig = pixel.V(-96, 64)
 			d.centeredTxt.Clear()
-			for _, item := range game.menu.options {
-				if item == game.menu.options[game.menu.selection] {
-					d.imd.Push(d.centeredTxt.Dot.Add(pixel.V(-12.0, (d.centeredTxt.LineHeight/2.0)-4)))
-					d.imd.Circle(2.0, 4.0)
-				}
-				fmt.Fprintln(d.centeredTxt, item)
-			}
+			drawMenu(d, &game.menu)
 
 			// d.centeredTxt.Color = color.RGBA64{255, 255, 255, 255}
 			d.centeredTxt.Draw(
@@ -930,26 +947,7 @@ func DrawGame(win *pixelgl.Window, game *game, d *DrawContext) {
 
 			d.centeredTxt.Orig = pixel.V(-112, 64)
 			d.centeredTxt.Clear()
-			for _, item := range game.menu.options {
-				if sliceextra.Contains(implementedMenuItems, item) {
-					d.centeredTxt.Color = colornames.White
-				} else {
-					d.centeredTxt.Color = colornames.Grey
-				}
-				if item == game.menu.options[game.menu.selection] {
-					d.centeredTxt.Color = colornames.Deepskyblue
-					d.imd.Push(
-						d.centeredTxt.Dot.Add(
-							pixel.V(
-								-8.0,
-								(d.centeredTxt.LineHeight/2.0)-4.0,
-							),
-						),
-					)
-					d.imd.Circle(2.0, 4.0)
-				}
-				fmt.Fprintln(d.centeredTxt, item)
-			}
+			drawMenu(d, &game.menu)
 
 			// d.centeredTxt.Color = color.RGBA64{255, 255, 255, 255}
 			d.centeredTxt.Draw(

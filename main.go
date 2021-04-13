@@ -74,7 +74,6 @@ func run() {
 	starshipkepler.PlayMenuMusic()
 
 	for !win.Closed() {
-
 		// TODO: Put this scaled mouse position code in either ui or game.
 		// Can probably ditch the depenency on the canvas?
 		scaledX := (win.MousePosition().X - (win.Bounds().W() / 2)) *
