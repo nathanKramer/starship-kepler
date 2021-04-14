@@ -199,27 +199,28 @@ func drawShip(d *imdraw.IMDraw) {
 	// d.Line(weight)
 }
 
-func drawBullet(bullet *entityData, d *imdraw.IMDraw) {
-	size := bullet.radius * 2
+func drawBullet(bullet *bullet, d *imdraw.IMDraw) {
 	d.Color = pixel.ToRGBA(color.RGBA{255, 192, 128, 255})
 
+	hw := bullet.width / 2
+	hl := bullet.length / 2
 	d.Push(
-		pixel.V(1.0, size),
-		pixel.V(1.0, -size),
-		pixel.V(-1.0, size),
-		pixel.V(-1.0, -size),
+		pixel.V(hw, hl),
+		pixel.V(hw, -hl),
+		pixel.V(-hw, hl),
+		pixel.V(-hw, -hl),
 	)
-	d.Rectangle(3)
+	d.Rectangle(0)
 
-	for i, el := range bullet.elements {
+	for i, el := range bullet.data.elements {
 		d.Color = elements[el]
 		d.Push(
-			pixel.V(1.0, (float64(i)*size)+float64(i+1)*size),
-			pixel.V(1.0, float64(i)*size),
-			pixel.V(-1.0, (float64(i)*size)+float64(i+1)*size),
-			pixel.V(-1.0, float64(i)*size),
+			pixel.V(hw, hl),
+			pixel.V(hw, hl/4.0*float64(i)),
+			pixel.V(-hw, hl),
+			pixel.V(-hw, hl/4.0*float64(i)),
 		)
-		d.Rectangle(8)
+		d.Rectangle(hw)
 	}
 }
 
@@ -244,6 +245,80 @@ func drawMenu(d *DrawContext, menu *menu) {
 		}
 		fmt.Fprintln(d.centeredTxt, item)
 	}
+}
+
+func drawDebug(d *DrawContext, game *game) {
+	txt := "Debugging: On"
+	fmt.Fprintln(d.scoreTxt, txt)
+
+	txt = "Timescale: %.2f\n"
+	fmt.Fprintf(d.scoreTxt, txt, game.data.timescale)
+
+	txt = "Entities: %d\n"
+	fmt.Fprintf(d.scoreTxt, txt, len(game.data.entities))
+
+	txt = "Entities Cap: %d\n"
+	fmt.Fprintf(d.scoreTxt, txt, cap(game.data.entities))
+
+	bufferedSpawns := 0
+	for _, ent := range game.data.newEntities {
+		if ent.entityType != "" {
+			bufferedSpawns++
+		}
+	}
+
+	// txt = "Buffered Living Entities: %d\n"
+	// fmt.Fprintf(d.scoreTxt, txt, bufferedSpawns)
+
+	// txt = "Buffered Entities Cap: %d\n"
+	// fmt.Fprintf(d.scoreTxt, txt, cap(game.data.newEntities))
+
+	activeParticles := 0
+	for _, p := range game.data.particles {
+		if p != (particle{}) {
+			activeParticles++
+		}
+	}
+
+	txt = "Particles: %d\n"
+	fmt.Fprintf(d.scoreTxt, txt, activeParticles)
+	txt = "Particles Cap: %d\n"
+	fmt.Fprintf(d.scoreTxt, txt, cap(game.data.particles))
+
+	bufferedParticles := 0
+	for _, particle := range game.data.newParticles {
+		if (particle.origin != pixel.Vec{}) {
+			bufferedParticles++
+		}
+	}
+
+	txt = "Buffered Particles: %d\n"
+	fmt.Fprintf(d.scoreTxt, txt, bufferedParticles)
+
+	txt = "Bullets: %d\n"
+	fmt.Fprintf(d.scoreTxt, txt, len(game.data.bullets))
+	txt = "Bullets Cap: %d\n"
+	fmt.Fprintf(d.scoreTxt, txt, cap(game.data.bullets))
+
+	txt = "Kills: %d\n"
+	fmt.Fprintf(d.scoreTxt, txt, game.data.kills)
+
+	txt = "Notoriety: %f\n"
+	fmt.Fprintf(d.scoreTxt, txt, game.data.notoriety)
+
+	txt = "spawnCount: %d\n"
+	fmt.Fprintf(d.scoreTxt, txt, game.data.spawnCount)
+
+	txt = "spawnFreq: %f\n"
+	fmt.Fprintf(d.scoreTxt, txt, game.data.ambientSpawnFreq)
+
+	txt = "waveFreq: %f\n"
+	fmt.Fprintf(d.scoreTxt, txt, game.data.waveFreq)
+
+	txt = "multiplierReward: %d kills required\n"
+	fmt.Fprintf(d.scoreTxt, txt, game.data.multiplierReward-game.data.killsSinceBorn)
+	// }
+
 }
 
 func DrawGame(win *pixelgl.Window, game *game, d *DrawContext) {
@@ -617,7 +692,7 @@ func DrawGame(win *pixelgl.Window, game *game, d *DrawContext) {
 					d.bulletDraw.Clear()
 					d.bulletDraw.SetMatrix(pixel.IM.Rotated(pixel.ZV, b.data.orientation.Angle()-math.Pi/2).Moved(b.data.origin))
 					d.bulletDraw.SetColorMask(pixel.Alpha(0.9 - (time.Since(b.data.born).Seconds() / b.duration)))
-					drawBullet(&b.data, d.bulletDraw)
+					drawBullet(&b, d.bulletDraw)
 					d.bulletDraw.Draw(d.imd)
 				}
 			}
@@ -744,77 +819,9 @@ func DrawGame(win *pixelgl.Window, game *game, d *DrawContext) {
 			d.scoreTxt.Dot.X -= (d.scoreTxt.BoundsOf(txt).W() / 2)
 			fmt.Fprintf(d.scoreTxt, txt, game.data.scoreMultiplier)
 
-			// if g_debug {
-			txt = "Debugging: On"
-			fmt.Fprintln(d.scoreTxt, txt)
-
-			txt = "Timescale: %.2f\n"
-			fmt.Fprintf(d.scoreTxt, txt, game.data.timescale)
-
-			txt = "Entities: %d\n"
-			fmt.Fprintf(d.scoreTxt, txt, len(game.data.entities))
-
-			txt = "Entities Cap: %d\n"
-			fmt.Fprintf(d.scoreTxt, txt, cap(game.data.entities))
-
-			bufferedSpawns := 0
-			for _, ent := range game.data.newEntities {
-				if ent.entityType != "" {
-					bufferedSpawns++
-				}
+			if g_debug {
+				drawDebug(d, game)
 			}
-
-			// txt = "Buffered Living Entities: %d\n"
-			// fmt.Fprintf(d.scoreTxt, txt, bufferedSpawns)
-
-			// txt = "Buffered Entities Cap: %d\n"
-			// fmt.Fprintf(d.scoreTxt, txt, cap(game.data.newEntities))
-
-			activeParticles := 0
-			for _, p := range game.data.particles {
-				if p != (particle{}) {
-					activeParticles++
-				}
-			}
-
-			txt = "Particles: %d\n"
-			fmt.Fprintf(d.scoreTxt, txt, activeParticles)
-			txt = "Particles Cap: %d\n"
-			fmt.Fprintf(d.scoreTxt, txt, cap(game.data.particles))
-
-			bufferedParticles := 0
-			for _, particle := range game.data.newParticles {
-				if (particle.origin != pixel.Vec{}) {
-					bufferedParticles++
-				}
-			}
-
-			txt = "Buffered Particles: %d\n"
-			fmt.Fprintf(d.scoreTxt, txt, bufferedParticles)
-
-			txt = "Bullets: %d\n"
-			fmt.Fprintf(d.scoreTxt, txt, len(game.data.bullets))
-			txt = "Bullets Cap: %d\n"
-			fmt.Fprintf(d.scoreTxt, txt, cap(game.data.bullets))
-
-			txt = "Kills: %d\n"
-			fmt.Fprintf(d.scoreTxt, txt, game.data.kills)
-
-			txt = "Notoriety: %f\n"
-			fmt.Fprintf(d.scoreTxt, txt, game.data.notoriety)
-
-			txt = "spawnCount: %d\n"
-			fmt.Fprintf(d.scoreTxt, txt, game.data.spawnCount)
-
-			txt = "spawnFreq: %f\n"
-			fmt.Fprintf(d.scoreTxt, txt, game.data.ambientSpawnFreq)
-
-			txt = "waveFreq: %f\n"
-			fmt.Fprintf(d.scoreTxt, txt, game.data.waveFreq)
-
-			txt = "multiplierReward: %d kills required\n"
-			fmt.Fprintf(d.scoreTxt, txt, game.data.multiplierReward-game.data.killsSinceBorn)
-			// }
 
 			d.scoreTxt.Draw(
 				win,

@@ -693,6 +693,9 @@ type bullet struct {
 	data     entityData
 	duration float64
 	velocity pixel.Vec
+
+	width  float64
+	length float64
 }
 
 func NewEntity(x float64, y float64, size float64, speed float64, entityType string) *entityData {
@@ -836,10 +839,12 @@ func NewGate(x float64, y float64) *entityData {
 	return b
 }
 
-func NewBullet(x float64, y float64, size float64, speed float64, target pixel.Vec, elements []string, duration float64) *bullet {
+func NewBullet(x float64, y float64, width float64, length float64, speed float64, target pixel.Vec, elements []string, duration float64) *bullet {
 	b := new(bullet)
 	b.duration = duration
-	b.data = *NewEntity(x, y, size, speed, "bullet")
+	b.data = *NewEntity(x, y, width, speed, "bullet")
+	b.width = width
+	b.length = length
 	b.data.target = target
 	b.data.elements = elements
 	b.data.orientation = target

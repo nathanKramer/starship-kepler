@@ -191,6 +191,7 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 		}
 
 		if win.JustPressed(pixelgl.KeyGraveAccent) {
+			g_debug = !g_debug
 			game.data.console = !game.data.console
 		}
 
@@ -379,8 +380,8 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 		// 	player.ReifyWard()
 		// }
 
-		timeSinceBullet := game.lastFrame.Sub(game.data.lastBullet).Seconds()
-		timeSinceAbleToShoot := timeSinceBullet - (game.data.weapon.fireRate / game.data.timescale)
+		timeSinceBullet := game.lastFrame.Sub(game.data.lastBullet).Milliseconds()
+		timeSinceAbleToShoot := timeSinceBullet - int64(float64(game.data.weapon.fireRate)/game.data.timescale)
 
 		if game.data.weapon != (weapondata{}) && timeSinceAbleToShoot >= 0 {
 			if game.data.mode == "menu_game" {
@@ -425,7 +426,8 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 							*NewBullet(
 								player.origin.X,
 								player.origin.Y,
-								game.data.weapon.bulletSize,
+								game.data.weapon.bulletWidth,
+								game.data.weapon.bulletLength,
 								game.data.weapon.velocity,
 								pixel.V(math.Cos(ang), math.Sin(ang)),
 								append([]string{}, player.elements...),
@@ -439,31 +441,43 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 
 				// Reflective bullets procedure.
 				// Temporarily disabled.
-				// finalBullets := make([]bullet, 0)
-				// for i := 0; i < len(game.data.newBullets); i++ {
-				// 	b := game.data.newBullets[i]
-				// 	finalBullets = append(finalBullets, b)
-				// 	if game.data.weapon.reflective > 0 {
-				// 		ang := 360 / float64(game.data.weapon.reflective+1)
+				additionalBullets := make([]bullet, 0)
+				if game.data.weapon.reflective > 0 {
+					for i := 0; i < len(game.data.newBullets); i++ {
+						b := game.data.newBullets[i]
 
-				// 		for j := 1; j <= game.data.weapon.reflective; j++ {
-				// 			reflectiveAngle := b.data.orientation.Angle() + (float64(j) * ang * math.Pi / 180)
-				// 			reflectiveAngleVec := pixel.V(math.Cos(reflectiveAngle), math.Sin(reflectiveAngle))
-				// 			finalBullets = append(
-				// 				finalBullets,
-				// 				*NewBullet(
-				// 					b.data.origin.X,
-				// 					b.data.origin.Y,
-				// 					game.data.weapon.bulletSize,
-				// 					game.data.weapon.velocity,
-				// 					reflectiveAngleVec,
-				// 					append([]string{}, player.elements...),
-				// 					game.data.weapon.duration,
-				// 				),
-				// 			)
-				// 		}
-				// 	}
-				// }
+						if !b.data.alive {
+							continue
+						}
+
+						ang := 360 / float64(game.data.weapon.reflective+1)
+
+						for j := 1; j <= game.data.weapon.reflective; j++ {
+							reflectiveAngle := b.data.orientation.Angle() + (float64(j) * ang * math.Pi / 180)
+							reflectiveAngleVec := pixel.V(math.Cos(reflectiveAngle), math.Sin(reflectiveAngle))
+							firingPos := player.origin.Add(reflectiveAngleVec.Scaled(25.0))
+							additionalBullets = append(
+								additionalBullets,
+								*NewBullet(
+									firingPos.X,
+									firingPos.Y,
+									game.data.weapon.bulletWidth,
+									game.data.weapon.bulletLength,
+									game.data.weapon.velocity,
+									reflectiveAngleVec,
+									append([]string{}, player.elements...),
+									game.data.weapon.duration,
+								),
+							)
+						}
+					}
+				}
+				for _, b := range additionalBullets {
+					game.data.newBullets = InlineAppendBullets(
+						game.data.newBullets,
+						b,
+					)
+				}
 
 				bulletID := 0
 				for addedID, newBullet := range game.data.newBullets {
@@ -487,49 +501,18 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 					}
 				}
 
-				overflow := timeSinceAbleToShoot * 1000
-				if overflow > game.data.weapon.fireRate {
-					overflow = 0
-				}
 				game.data.lastBullet = game.lastFrame
 
-				shot := shotBuffer3.Streamer(0, shotBuffer3.Len())
-				volume := &effects.Volume{
-					Streamer: shot,
-					Base:     10,
-					Volume:   -1.3,
-					Silent:   false,
+				shotSound := "sound/shoot3.mp3"
+				if game.data.weapon.bulletCount > 2 && game.data.weapon.conicAngle > 0 {
+					shotSound = "sound/shoot-mixed.mp3"
+				} else if game.data.weapon.conicAngle > 0 {
+					shotSound = "sound/shoot2.mp3"
+				} else if game.data.weapon.bulletCount > 3 {
+					shotSound = "sound/shoot.mp3"
 				}
 
-				if game.data.weapon.bulletCount > 2 && game.data.weapon.conicAngle > 0 {
-					shot = shotBuffer4.Streamer(0, shotBuffer4.Len())
-					volume = &effects.Volume{
-						Streamer: shot,
-						Base:     10,
-						Volume:   -0.9,
-						Silent:   false,
-					}
-					speaker.Play(volume)
-				} else if game.data.weapon.conicAngle > 0 {
-					shot = shotBuffer2.Streamer(0, shotBuffer2.Len())
-					volume = &effects.Volume{
-						Streamer: shot,
-						Base:     10,
-						Volume:   -0.7,
-						Silent:   false,
-					}
-					speaker.Play(volume)
-				} else if game.data.weapon.bulletCount > 3 {
-					shot = shotBuffer.Streamer(0, shotBuffer.Len())
-					volume = &effects.Volume{
-						Streamer: shot,
-						Base:     10,
-						Volume:   -0.9,
-						Silent:   false,
-					}
-					speaker.Play(volume)
-				}
-				// speaker.Play(volume)
+				PlaySound(shotSound)
 			}
 		}
 		player.relativeTarget = aim.Unit()
@@ -638,6 +621,7 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 		}
 		game.data.timescale = math.Max(0.1, math.Min(256, closestEnemyDist)/256.0)
 
+		// TODO: Need to make the bullet grid force effect better with lots of bullets in one place
 		for i, b := range game.data.bullets {
 			if !b.data.alive {
 				game.data.bullets[i] = bullet{}
@@ -645,13 +629,17 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 			}
 			b.data.origin = b.data.origin.Add(b.velocity.Scaled(dt))
 			if game.data.weapon.randomCone == 0 {
-				if game.data.weapon.bulletCount > 2 {
-					if math.Mod(game.totalTime, 0.4) < 0.8 {
-						game.grid.ApplyExplosiveForce(b.velocity.Scaled(dt).Len()*1.25, Vector3{b.data.origin.X, b.data.origin.Y, 0.0}, 60.0)
-					}
-				} else {
-					game.grid.ApplyDirectedForce(Vector3{b.velocity.X * dt * 0.05, b.velocity.Y * dt * 0.05, 0.0}, Vector3{b.data.origin.X, b.data.origin.Y, 0.0}, 40.0)
+				// if game.data.weapon.bulletCount > 2 {
+				if math.Mod(game.totalTime, 0.4) < 0.8 {
+					game.grid.ApplyExplosiveForce(b.velocity.Scaled(dt).Len()*0.8, Vector3{b.data.origin.X, b.data.origin.Y, 0.0}, 60.0)
 				}
+				// } else {
+				// 	game.grid.ApplyDirectedForce(
+				// 		Vector3{b.velocity.Scaled(dt).X * 0.02, b.velocity.Scaled(dt).Y * 0.02, 0.0},
+				// 		Vector3{b.data.origin.X, b.data.origin.Y, 0.0},
+				// 		40.0,
+				// 	)
+				// }
 			}
 
 			game.data.bullets[i] = b
@@ -999,15 +987,26 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 			game.data.weapon = *NewWeaponData()
 
 			// inclusion checks
+			elCounts := map[string]int{}
 			for _, el := range player.elements {
+				count, ok := elCounts[el]
+				if ok {
+					elCounts[el] = count + 1
+				} else {
+					elCounts[el] = 1
+				}
+
 				if el == "water" || el == "spirit" {
 					game.data.weapon.bulletCount = 1
 				} else if el == "fire" {
 					game.data.weapon.bulletCount = 4
 					game.data.weapon.duration = 0.25
-					game.data.weapon.fireRate = 0.05
+					game.data.weapon.fireRate = 50
 					game.data.weapon.randomCone = 12
 				}
+			}
+			if elCounts["chaos"] == 2 {
+				game.data.weapon.bulletCount = 1
 			}
 
 			// cumulative effects
@@ -1029,7 +1028,7 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 					game.data.weapon.velocity = game.data.weapon.velocity + 100
 
 					// takes precedence over fire
-					game.data.weapon.fireRate = math.Max(0.13, game.data.weapon.fireRate-0.03)
+					game.data.weapon.fireRate = int64(math.Max(float64(130), float64(game.data.weapon.fireRate-30)))
 					game.data.weapon.duration = 5.0
 					if game.data.weapon.randomCone > 0 {
 						game.data.weapon.randomCone = 0
@@ -1044,24 +1043,27 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 						game.data.weapon.bulletCount = game.data.weapon.bulletCount + 3
 					}
 				} else if el == "spirit" {
-					game.data.weapon.velocity = game.data.weapon.velocity + 600
-					game.data.weapon.bulletSize = game.data.weapon.bulletSize + 6
+					game.data.weapon.velocity = game.data.weapon.velocity + 400
+					game.data.weapon.bulletLength = game.data.weapon.bulletLength + 4
 					game.data.weapon.conicAngle = game.data.weapon.conicAngle + 1
 
 					// takes precedence over fire
 					game.data.weapon.duration = 5.0
-					game.data.weapon.fireRate = math.Max(0.144, game.data.weapon.fireRate-0.03)
+					game.data.weapon.fireRate = int64(math.Max(float64(144), float64(game.data.weapon.fireRate-30)))
 					if game.data.weapon.randomCone > 0 {
 						game.data.weapon.randomCone = 0
 						game.data.weapon.bulletCount = 2
 					}
 				} else if el == "lightning" {
-					game.data.weapon.fireRate = game.data.weapon.fireRate - 0.03
+					game.data.weapon.bulletWidth = game.data.weapon.bulletWidth / 1.4
+					game.data.weapon.bulletLength = game.data.weapon.bulletLength * 1.4
+					game.data.weapon.velocity = game.data.weapon.velocity + 150
+					game.data.weapon.fireRate = game.data.weapon.fireRate - 30
 					game.data.weapon.duration = game.data.weapon.duration + 0.125
 				} else if el == "chaos" {
 					game.data.weapon.reflective = game.data.weapon.reflective + 1
 					game.data.weapon.conicAngle = game.data.weapon.conicAngle + 2
-					game.data.weapon.fireRate = game.data.weapon.fireRate - 0.02
+					game.data.weapon.fireRate = game.data.weapon.fireRate - 20
 					game.data.weapon.duration = game.data.weapon.duration + 0.125
 				}
 			}

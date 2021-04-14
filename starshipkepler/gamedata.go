@@ -28,14 +28,16 @@ type wavedata struct {
 }
 
 type weapondata struct {
-	fireRate    float64
+	fireRate    int64 // milliseconds
 	conicAngle  float64
 	randomCone  float64
 	bulletCount int
-	bulletSize  float64
 	velocity    float64
 	reflective  int
 	duration    float64
+
+	bulletWidth  float64
+	bulletLength float64
 }
 
 type gamedata struct {
@@ -159,9 +161,10 @@ func NewWaveData(entityType string, freq float64, duration float64) *wavedata {
 func NewWeaponData() *weapondata {
 	weaponData := new(weapondata)
 	weaponData.velocity = 1100
-	weaponData.fireRate = 0.15
+	weaponData.fireRate = 150
 	weaponData.bulletCount = 2
-	weaponData.bulletSize = 8
+	weaponData.bulletWidth = 8
+	weaponData.bulletLength = 20
 	weaponData.conicAngle = 0
 	weaponData.randomCone = 0
 	weaponData.duration = 5.0
@@ -172,9 +175,10 @@ func NewWeaponData() *weapondata {
 func NewBurstWeapon() *weapondata {
 	weaponData := new(weapondata)
 	weaponData.velocity = 1100
-	weaponData.fireRate = 0.15
+	weaponData.fireRate = 150
 	weaponData.bulletCount = 5
-	weaponData.bulletSize = 8
+	weaponData.bulletWidth = 8
+	weaponData.bulletLength = 20
 	weaponData.conicAngle = 0
 	weaponData.randomCone = 0
 
@@ -184,8 +188,9 @@ func NewBurstWeapon() *weapondata {
 func NewConicWeapon() *weapondata {
 	weaponData := new(weapondata)
 	weaponData.velocity = 1400
-	weaponData.fireRate = 0.1
-	weaponData.bulletSize = 8
+	weaponData.fireRate = 100
+	weaponData.bulletWidth = 8
+	weaponData.bulletLength = 20
 	weaponData.conicAngle = 8
 	weaponData.randomCone = 0
 
@@ -331,7 +336,8 @@ func FireBullet(aim pixel.Vec, game *game, origin pixel.Vec, player *entityData)
 		b := NewBullet(
 			bPos.X,
 			bPos.Y,
-			game.data.weapon.bulletSize,
+			game.data.weapon.bulletWidth,
+			game.data.weapon.bulletLength,
 			game.data.weapon.velocity,
 			aim.Unit().Rotated(increment),
 			append([]string{}, player.elements...),

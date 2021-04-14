@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/faiface/beep"
+	"github.com/faiface/beep/effects"
 	"github.com/faiface/beep/mp3"
 	"github.com/faiface/beep/speaker"
 )
@@ -44,6 +45,13 @@ var pacifismMusicStreamer *beep.StreamSeekCloser
 var menuMusicStreamer *beep.StreamSeekCloser
 var introStreamer *beep.StreamSeekCloser
 
+type soundEffect struct {
+	buffer *beep.Buffer
+	volume float64
+}
+
+var soundEffects = map[string]*soundEffect{}
+
 func prepareStreamer(file string) (*beep.StreamSeekCloser, *beep.Format) {
 	sound, _ := os.Open(file)
 	streamer, format, err := mp3.Decode(sound)
@@ -68,11 +76,32 @@ func prepareBuffer(file string) (*beep.Buffer, *beep.Format) {
 }
 
 func init() {
-	// todo use a data structure probably
+	// TODO:
+	// Unify how sounds are played, and make them driven by configuration
 	shotBuffer, shotSoundFormat = prepareBuffer("sound/shoot.mp3")
+	soundEffects["sound/shoot.mp3"] = &soundEffect{
+		buffer: shotBuffer,
+		volume: -0.9,
+	}
+
 	shotBuffer2, shotSoundFormat = prepareBuffer("sound/shoot2.mp3")
+	soundEffects["sound/shoot2.mp3"] = &soundEffect{
+		buffer: shotBuffer2,
+		volume: -0.7,
+	}
+
 	shotBuffer3, shotSoundFormat = prepareBuffer("sound/shoot3.mp3")
+	shotBuffer3.Streamer(0, shotBuffer3.Len())
+	soundEffects["sound/shoot3.mp3"] = &soundEffect{
+		buffer: shotBuffer3,
+		volume: -1.2,
+	}
+
 	shotBuffer4, shotSoundFormat = prepareBuffer("sound/shoot-mixed.mp3")
+	soundEffects["sound/shoot-mixed.mp3"] = &soundEffect{
+		buffer: shotBuffer4,
+		volume: -0.9,
+	}
 
 	spawnBuffer, _ = prepareBuffer("sound/spawn.mp3")
 	spawnBuffer2, _ = prepareBuffer("sound/spawn2.mp3")
@@ -146,4 +175,17 @@ func PlayMusic() {
 	s.Seek(0)
 	speaker.Play(s)
 	// defer s.Close()
+}
+
+func PlaySound(soundName string) {
+	soundEffect := soundEffects[soundName]
+	sound := soundEffect.buffer.Streamer(0, soundEffect.buffer.Len())
+
+	volume := &effects.Volume{
+		Streamer: sound,
+		Base:     10,
+		Volume:   soundEffect.volume,
+		Silent:   false,
+	}
+	speaker.Play(volume)
 }
