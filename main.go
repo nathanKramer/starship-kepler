@@ -82,6 +82,10 @@ func run() {
 		uiContext.MousePos = pixel.V(scaledX, scaledY).Add(game.CamPos)
 
 		starshipkepler.UpdateGame(win, game, uiContext)
+		if win.Bounds().W() != draw.PrimaryCanvas.Bounds().W() {
+			// Resolution changed, tell the draw context
+			draw.SetBounds(win.Bounds())
+		}
 		starshipkepler.DrawGame(win, game, draw)
 
 		win.Update()

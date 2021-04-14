@@ -84,30 +84,6 @@ func NewDrawContext(cfg pixelgl.WindowConfig) *DrawContext {
 	drawContext.wardInner = pixel.NewSprite(wardInnerPic, wardInnerPic.Bounds())
 	drawContext.wardOuter = pixel.NewSprite(wardOuterPic, wardOuterPic.Bounds())
 
-	drawContext.PrimaryCanvas = pixelgl.NewCanvas(pixel.R(-cfg.Bounds.W()/2, -cfg.Bounds.H()/2, cfg.Bounds.W()/2, cfg.Bounds.H()/2))
-	drawContext.uiCanvas = pixelgl.NewCanvas(pixel.R(-cfg.Bounds.W()/2, -cfg.Bounds.H()/2, cfg.Bounds.W()/2, cfg.Bounds.H()/2))
-
-	drawContext.bloom1 = pixelgl.NewCanvas(pixel.R(-cfg.Bounds.W()/2, -cfg.Bounds.H()/2, cfg.Bounds.W()/2, cfg.Bounds.H()/2))
-	extractBrightness, err := loadFileToString("./shaders/extract_bright_areas.glsl")
-	if err != nil {
-		panic(err)
-	}
-	drawContext.bloom1.SetFragmentShader(extractBrightness)
-
-	drawContext.bloom2 = pixelgl.NewCanvas(pixel.R(-cfg.Bounds.W()/2, -cfg.Bounds.H()/2, cfg.Bounds.W()/2, cfg.Bounds.H()/2))
-	blur, err := loadFileToString("./shaders/blur.glsl")
-	if err != nil {
-		panic(err)
-	}
-	drawContext.bloom2.SetFragmentShader(blur)
-
-	drawContext.bloom3 = pixelgl.NewCanvas(pixel.R(-cfg.Bounds.W()/2, -cfg.Bounds.H()/2, cfg.Bounds.W()/2, cfg.Bounds.H()/2))
-	// blur, err = loadFileToString("./shaders/blur.glsl")
-	// if err != nil {
-	// 	panic(err)
-	// }
-	drawContext.bloom3.SetFragmentShader(blur)
-
 	drawContext.innerWardBatch = imdraw.New(wardInnerPic)
 	drawContext.outerWardBatch = imdraw.New(wardOuterPic)
 
@@ -150,10 +126,40 @@ func NewDrawContext(cfg pixelgl.WindowConfig) *DrawContext {
 	drawContext.titleTxt = text.New(pixel.V(0, 128), drawContext.titleFont)
 	drawContext.gameOverTxt = text.New(pixel.V(0, 64), basicFont)
 	drawContext.centeredTxt = text.New(pixel.V(0, 0), basicFont)
-	drawContext.scoreTxt = text.New(pixel.V(-(cfg.Bounds.W()/2)+120, (cfg.Bounds.H()/2)-50), basicFont)
-	drawContext.livesTxt = text.New(pixel.V(0.0, (cfg.Bounds.H()/2)-50), basicFont)
 
+	drawContext.SetBounds(cfg.Bounds)
 	return drawContext
+}
+
+func (d *DrawContext) SetBounds(bounds pixel.Rect) {
+	d.PrimaryCanvas = pixelgl.NewCanvas(pixel.R(-bounds.W()/2, -bounds.H()/2, bounds.W()/2, bounds.H()/2))
+	d.uiCanvas = pixelgl.NewCanvas(pixel.R(-bounds.W()/2, -bounds.H()/2, bounds.W()/2, bounds.H()/2))
+
+	d.bloom1 = pixelgl.NewCanvas(pixel.R(-bounds.W()/2, -bounds.H()/2, bounds.W()/2, bounds.H()/2))
+	extractBrightness, err := loadFileToString("./shaders/extract_bright_areas.glsl")
+	if err != nil {
+		panic(err)
+	}
+	d.bloom1.SetFragmentShader(extractBrightness)
+
+	d.bloom2 = pixelgl.NewCanvas(pixel.R(-bounds.W()/2, -bounds.H()/2, bounds.W()/2, bounds.H()/2))
+	blur, err := loadFileToString("./shaders/blur.glsl")
+	if err != nil {
+		panic(err)
+	}
+	d.bloom2.SetFragmentShader(blur)
+
+	d.bloom3 = pixelgl.NewCanvas(pixel.R(-bounds.W()/2, -bounds.H()/2, bounds.W()/2, bounds.H()/2))
+	// blur, err = loadFileToString("./shaders/blur.glsl")
+	// if err != nil {
+	// 	panic(err)
+	// }
+	d.bloom3.SetFragmentShader(blur)
+
+	d.scoreTxt = text.New(pixel.V(-(bounds.W()/2)+120, (bounds.H()/2)-50), basicFont)
+	d.livesTxt = text.New(pixel.V(0.0, (bounds.H()/2)-50), basicFont)
+	d.scoreTxt = text.New(pixel.V(-(bounds.W()/2)+120, (bounds.H()/2)-50), basicFont)
+	d.livesTxt = text.New(pixel.V(0.0, (bounds.H()/2)-50), basicFont)
 }
 
 func drawShip(d *imdraw.IMDraw) {
