@@ -108,10 +108,24 @@ type game struct {
 	totalTime          float64
 	debugInfos         []debugInfo
 	globalTimeScale    float64
+
+	music bool
 }
 
 // Menus
-var implementedMenuItems = []string{"Quick Play: Evolved", "Quick Play: Pacifism", "Options", "Quit", "Resume", "Main Menu"}
+var implementedMenuItems = []string{
+	"Quick Play: Evolved",
+	"Quick Play: Pacifism",
+	"Options",
+	"Quit",
+	"Resume",
+	"Main Menu",
+	"Music On",
+	"Music Off",
+	"Fullscreen (1080p)",
+	"Windowed (1024x768)",
+	"Back",
+}
 
 func NewMainMenu() menu {
 	return menu{
@@ -142,8 +156,11 @@ func NewOptionsMenu() menu {
 	return menu{
 		selection: 0,
 		options: []string{
-			"Resume",
-			"Main Menu",
+			"Fullscreen (1080p)",
+			"Windowed (1024x768)",
+			"Music Off",
+			"Music On",
+			"Back",
 		},
 	}
 }
@@ -319,6 +336,9 @@ func NewGame() *game {
 	game.totalTime = 0.0
 	game.debugInfos = []debugInfo{}
 	game.globalTimeScale = 1.0
+
+	// TODO: Put user options in a sensible place
+	game.music = true
 
 	return game
 }

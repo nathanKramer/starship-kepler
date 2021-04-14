@@ -104,6 +104,16 @@ func init() {
 	}
 
 	spawnBuffer, _ = prepareBuffer("sound/spawn.mp3")
+	soundEffects["sound/spawn.mp3"] = &soundEffect{
+		buffer: spawnBuffer,
+		volume: -0.9,
+	}
+	// TODO: Use a real sound effect for this
+	soundEffects["menu/increment"] = &soundEffect{
+		buffer: spawnBuffer,
+		volume: -0.9,
+	}
+
 	spawnBuffer2, _ = prepareBuffer("sound/spawn2.mp3")
 	spawnBuffer3, _ = prepareBuffer("sound/spawn3.mp3")
 	spawnBuffer4, _ = prepareBuffer("sound/spawn4.mp3")

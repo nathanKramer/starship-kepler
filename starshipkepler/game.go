@@ -82,35 +82,53 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 
 	if game.state == "main_menu" || game.state == "paused" {
 		if playerConfirmed {
-			if game.menu.options[game.menu.selection] == "Story Mode" {
+			switch game.menu.options[game.menu.selection] {
+			case "Story Mode":
 				game.state = "starting"
 				game.data = *NewStoryGame()
-			}
-			if game.menu.options[game.menu.selection] == "Quick Play: Evolved" {
+
+			case "Quick Play: Evolved":
 				game.state = "starting"
 				game.data = *NewEvolvedGame()
-			}
-			if game.menu.options[game.menu.selection] == "Quick Play: Pacifism" {
+
+			case "Quick Play: Pacifism":
 				game.state = "starting"
 				game.data = *NewPacifismGame()
-			}
-			if game.menu.options[game.menu.selection] == "Options" {
+
+			case "Options":
 				game.menu = NewOptionsMenu()
-			}
-			if game.menu.options[game.menu.selection] == "Main Menu" {
-				game.state = "reset"
-			}
-			if game.menu.options[game.menu.selection] == "Quit" {
+
+			case "Fullscreen (1080p)":
+				win.SetMonitor(pixelgl.PrimaryMonitor())
+				win.SetBounds(pixel.R(0, 0, 1920, 1080))
+
+			case "Windowed (1024x768)":
+				win.SetMonitor(nil)
+				win.SetBounds(pixel.R(0, 0, 1024, 768))
+
+			case "Quit":
 				game.state = "quitting"
-			}
-			if game.menu.options[game.menu.selection] == "Resume" {
+
+			case "Resume":
 				game.state = "playing"
-			}
-			if game.menu.options[game.menu.selection] == "Main Menu" {
+
+			case "Back":
+				game.menu = NewMainMenu()
+
+			case "Main Menu":
 				game.state = "main_menu"
-				PlayMenuMusic()
+				if game.music {
+					PlayMenuMusic()
+				}
 				game.menu = NewMainMenu()
 				game.data = *NewMenuGame()
+
+			case "Music On":
+				game.music = true
+				PlayMenuMusic()
+			case "Music Off":
+				game.music = false
+				speaker.Clear()
 			}
 		}
 
@@ -123,6 +141,7 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 
 		menuChange := uiChangeSelection(win, uiGamePadDir, game.lastFrame, game.lastMenuChoiceTime)
 		if menuChange != 0 {
+			PlaySound("menu/increment")
 			game.menu.selection = (game.menu.selection + menuChange) % len(game.menu.options)
 			if game.menu.selection < 0 {
 				// would have thought modulo would handle negatives. /shrug
@@ -142,22 +161,32 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 	if game.state == "start_screen" {
 		if playerConfirmed || playerCancelled {
 			game.state = "main_menu"
-			PlayMenuMusic()
+			if game.music {
+				PlayMenuMusic()
+			}
 			game.menu = NewMainMenu()
 			game.data = *NewMenuGame()
 		}
 	}
 
 	if game.state == "starting" {
-		if game.data.mode == "evolved" {
+		switch game.data.mode {
+		case "evolved":
 			game.data = *NewEvolvedGame()
-			PlayMusic()
-		} else if game.data.mode == "pacifism" {
+		case "pacifism":
 			game.data = *NewPacifismGame()
-			PlayPacifismMusic()
-		} else {
+		default:
 			game.data = *NewStoryGame()
-			PlayMenuMusic()
+		}
+		if game.music {
+			switch game.data.mode {
+			case "evolved":
+				PlayMusic()
+			case "pacifism":
+				PlayPacifismMusic()
+			default:
+				PlayMenuMusic()
+			}
 		}
 
 		game.state = "playing"
@@ -171,7 +200,9 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 			game.state = "starting"
 		} else if playerCancelled {
 			game.state = "main_menu"
-			PlayMenuMusic()
+			if game.music {
+				PlayMenuMusic()
+			}
 			game.menu = NewMainMenu()
 			game.data = *NewMenuGame()
 		}
