@@ -195,6 +195,24 @@ func initSounds() {
 		volume: -1.0,
 	}
 
+	buffer, _ = prepareBuffer("sound/ward-spawn.wav")
+	soundEffects["ward/spawn"] = &soundEffect{
+		buffer: buffer,
+		volume: -0.8,
+	}
+
+	buffer, _ = prepareBuffer("sound/ward-die.wav")
+	soundEffects["ward/die"] = &soundEffect{
+		buffer: buffer,
+		volume: -0.8,
+	}
+
+	buffer, _ = prepareBuffer("sound/entity-die.wav")
+	soundEffects["entity/die"] = &soundEffect{
+		buffer: buffer,
+		volume: -1.3,
+	}
+
 	spawnBuffer, _ = prepareBuffer("sound/spawn.mp3")
 	soundEffects["sound/spawn.mp3"] = &soundEffect{
 		buffer: spawnBuffer,

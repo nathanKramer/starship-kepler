@@ -304,6 +304,7 @@ func (e *entityData) IntersectWithPlayer(
 			for _, playerEl := range player.elements {
 				if el == playerEl {
 					warded = true
+					PlaySound("ward/die")
 					e.DealDamage(player, eID, 1, currTime, game, player)
 					break
 				}
@@ -448,6 +449,7 @@ func (e *entityData) DealDamage(
 		}
 
 		// on kill
+		PlaySound("entity/die")
 		if e.entityType == "pink" {
 			// spawn 3 mini plebs
 			for i := 0; i < 3; i++ {
@@ -873,6 +875,7 @@ func SetBoosting(p *entityData) {
 }
 
 func (p *entityData) QueueElement(element string) {
+	PlaySound("ward/spawn")
 	if len(p.elements) < 2 {
 		p.elements = append(p.elements, element)
 	} else if p.elements[0] != element && p.elements[1] != element {
