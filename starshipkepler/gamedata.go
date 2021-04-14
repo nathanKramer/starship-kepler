@@ -107,6 +107,7 @@ type game struct {
 	lastMenuChoiceTime time.Time
 	totalTime          float64
 	debugInfos         []debugInfo
+	globalTimeScale    float64
 }
 
 // Menus
@@ -317,6 +318,7 @@ func NewGame() *game {
 
 	game.totalTime = 0.0
 	game.debugInfos = []debugInfo{}
+	game.globalTimeScale = 1.0
 
 	return game
 }

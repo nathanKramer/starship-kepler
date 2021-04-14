@@ -15,6 +15,10 @@ import (
 	"golang.org/x/image/colornames"
 )
 
+func (game *game) timescale() float64 {
+	return game.globalTimeScale * game.data.timescale
+}
+
 func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 
 	if game.lastFrame.Sub(game.lastMemCheck).Seconds() > 5.0 {
@@ -45,7 +49,7 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 	}
 
 	// update
-	dt := math.Min(time.Since(game.lastFrame).Seconds(), 0.1) * game.data.timescale
+	dt := math.Min(time.Since(game.lastFrame).Seconds(), 0.1) * game.timescale()
 	game.totalTime += dt
 	game.lastFrame = time.Now()
 
@@ -196,108 +200,102 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 		}
 
 		// player controls
-		if game.data.console {
-			if win.JustPressed(pixelgl.KeyEnter) {
-				game.data.console = false
+		if win.JustPressed(pixelgl.KeyMinus) {
+			game.globalTimeScale *= 0.5
+			if game.globalTimeScale < 0.1 {
+				game.globalTimeScale = 0.0
 			}
-		} else {
-			if win.JustPressed(pixelgl.KeyMinus) {
-				game.data.timescale *= 0.5
-				if game.data.timescale < 0.1 {
-					game.data.timescale = 0.0
-				}
+		}
+		if win.JustPressed(pixelgl.KeyEqual) {
+			game.globalTimeScale *= 2.0
+			if game.globalTimeScale > 4.0 || game.globalTimeScale == 0.0 {
+				game.globalTimeScale = 1.0
 			}
-			if win.JustPressed(pixelgl.KeyEqual) {
-				game.data.timescale *= 2.0
-				if game.data.timescale > 4.0 || game.data.timescale == 0.0 {
-					game.data.timescale = 1.0
-				}
-			}
-			if win.JustPressed(pixelgl.Key1) {
-				game.data.weapon = *NewWeaponData()
-			}
-			if win.JustPressed(pixelgl.Key2) {
-				game.data.weapon = *NewBurstWeapon()
-			}
-			if win.JustPressed(pixelgl.Key3) {
-				game.data.weapon = *NewConicWeapon()
-			}
+		}
+		if win.JustPressed(pixelgl.Key1) {
+			game.data.weapon = *NewWeaponData()
+		}
+		if win.JustPressed(pixelgl.Key2) {
+			game.data.weapon = *NewBurstWeapon()
+		}
+		if win.JustPressed(pixelgl.Key3) {
+			game.data.weapon = *NewConicWeapon()
+		}
 
-			// player.velocity = pixel.ZV
-			// if win.Pressed(uiActionAct) {
-			// mouse based target movement
-			// 	player.target = mp
-			// }
+		// player.velocity = pixel.ZV
+		// if win.Pressed(uiActionAct) {
+		// mouse based target movement
+		// 	player.target = mp
+		// }
 
-			// if win.Pressed(uiActionSwitchMode) {
-			// 	// GW
-			// 	player.mode = "GW"
-			// 	player.elements = make([]string, 0)
-			// } else {
-			// 	player.mode = "MWW"
-			// }
+		// if win.Pressed(uiActionSwitchMode) {
+		// 	// GW
+		// 	player.mode = "GW"
+		// 	player.elements = make([]string, 0)
+		// } else {
+		// 	player.mode = "MWW"
+		// }
 
-			if win.Pressed(pixelgl.KeyLeft) || win.Pressed(pixelgl.KeyA) {
-				direction = direction.Add(pixel.V(-1, 0))
-				player.target = pixel.Vec{}
-			}
-			if win.Pressed(pixelgl.KeyUp) || win.Pressed(pixelgl.KeyW) {
-				direction = direction.Add(pixel.V(0, 1))
-				player.target = pixel.Vec{}
-			}
-			if win.Pressed(pixelgl.KeyRight) || win.Pressed(pixelgl.KeyD) {
-				direction = direction.Add(pixel.V(1, 0))
-				player.target = pixel.Vec{}
-			}
-			if win.Pressed(pixelgl.KeyDown) || win.Pressed(pixelgl.KeyS) {
-				direction = direction.Add(pixel.V(0, -1))
-				player.target = pixel.Vec{}
-			}
+		if win.Pressed(pixelgl.KeyLeft) || win.Pressed(pixelgl.KeyA) {
+			direction = direction.Add(pixel.V(-1, 0))
+			player.target = pixel.Vec{}
+		}
+		if win.Pressed(pixelgl.KeyUp) || win.Pressed(pixelgl.KeyW) {
+			direction = direction.Add(pixel.V(0, 1))
+			player.target = pixel.Vec{}
+		}
+		if win.Pressed(pixelgl.KeyRight) || win.Pressed(pixelgl.KeyD) {
+			direction = direction.Add(pixel.V(1, 0))
+			player.target = pixel.Vec{}
+		}
+		if win.Pressed(pixelgl.KeyDown) || win.Pressed(pixelgl.KeyS) {
+			direction = direction.Add(pixel.V(0, -1))
+			player.target = pixel.Vec{}
+		}
 
-			if win.JustPressed(pixelgl.KeyQ) || win.JoystickJustPressed(ui.currJoystick, pixelgl.ButtonX) {
-				player.QueueElement("water")
-			}
-			if win.JustPressed(pixelgl.KeyE) || win.JoystickJustPressed(ui.currJoystick, pixelgl.ButtonRightBumper) {
-				player.QueueElement("chaos")
-			}
-			if win.JustPressed(pixelgl.KeyR) || win.JoystickJustPressed(ui.currJoystick, pixelgl.ButtonLeftBumper) {
-				player.QueueElement("spirit")
-			}
-			if win.JustPressed(pixelgl.KeyF) || win.JoystickJustPressed(ui.currJoystick, pixelgl.ButtonB) {
-				player.QueueElement("fire")
-			}
-			if win.JustPressed(pixelgl.KeyZ) || win.JoystickJustPressed(ui.currJoystick, pixelgl.ButtonA) {
-				player.QueueElement("lightning")
-			}
-			if win.JustPressed(pixelgl.KeyX) || win.JoystickJustPressed(ui.currJoystick, pixelgl.ButtonY) {
-				player.QueueElement("wind")
-			}
-			if win.JustPressed(pixelgl.KeyC) {
-				player.QueueElement("life")
-			}
+		if win.JustPressed(pixelgl.KeyQ) || win.JoystickJustPressed(ui.currJoystick, pixelgl.ButtonX) {
+			player.QueueElement("water")
+		}
+		if win.JustPressed(pixelgl.KeyE) || win.JoystickJustPressed(ui.currJoystick, pixelgl.ButtonRightBumper) {
+			player.QueueElement("chaos")
+		}
+		if win.JustPressed(pixelgl.KeyR) || win.JoystickJustPressed(ui.currJoystick, pixelgl.ButtonLeftBumper) {
+			player.QueueElement("spirit")
+		}
+		if win.JustPressed(pixelgl.KeyF) || win.JoystickJustPressed(ui.currJoystick, pixelgl.ButtonB) {
+			player.QueueElement("fire")
+		}
+		if win.JustPressed(pixelgl.KeyZ) || win.JoystickJustPressed(ui.currJoystick, pixelgl.ButtonA) {
+			player.QueueElement("lightning")
+		}
+		if win.JustPressed(pixelgl.KeyX) || win.JoystickJustPressed(ui.currJoystick, pixelgl.ButtonY) {
+			player.QueueElement("wind")
+		}
+		if win.JustPressed(pixelgl.KeyC) {
+			player.QueueElement("life")
+		}
 
-			if win.Pressed(uiActionStop) || player.origin.To(player.target).Len() < 50.0 {
-				player.target = pixel.Vec{}
-			}
+		if win.Pressed(uiActionStop) || player.origin.To(player.target).Len() < 50.0 {
+			player.target = pixel.Vec{}
+		}
 
-			if (player.target != pixel.Vec{}) {
-				direction = direction.Add(player.origin.To(player.target).Unit())
-				midColor := HSVToColor(3.0, 0.7, 1.0)
-				game.data.newParticles = InlineAppendParticles(
-					game.data.newParticles,
-					NewParticle(player.target.X, player.target.Y, midColor, 32.0, pixel.V(0.5, 1.0), 0.0, randomVector(1), 1.0, "ship"),
-				)
-			}
+		if (player.target != pixel.Vec{}) {
+			direction = direction.Add(player.origin.To(player.target).Unit())
+			midColor := HSVToColor(3.0, 0.7, 1.0)
+			game.data.newParticles = InlineAppendParticles(
+				game.data.newParticles,
+				NewParticle(player.target.X, player.target.Y, midColor, 32.0, pixel.V(0.5, 1.0), 0.0, randomVector(1), 1.0, "ship"),
+			)
+		}
 
-			if win.JoystickPresent(ui.currJoystick) {
-				moveVec := uiThumbstickVector(
-					win,
-					ui.currJoystick,
-					pixelgl.AxisLeftX,
-					pixelgl.AxisLeftY,
-				)
-				direction = direction.Add(moveVec)
-			}
+		if win.JoystickPresent(ui.currJoystick) {
+			moveVec := uiThumbstickVector(
+				win,
+				ui.currJoystick,
+				pixelgl.AxisLeftX,
+				pixelgl.AxisLeftY,
+			)
+			direction = direction.Add(moveVec)
 		}
 
 		// paste debug.go
@@ -381,7 +379,7 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 		// }
 
 		timeSinceBullet := game.lastFrame.Sub(game.data.lastBullet).Milliseconds()
-		timeSinceAbleToShoot := timeSinceBullet - int64(float64(game.data.weapon.fireRate)/game.data.timescale)
+		timeSinceAbleToShoot := timeSinceBullet - int64(float64(game.data.weapon.fireRate)/game.timescale())
 
 		if game.data.weapon != (weapondata{}) && timeSinceAbleToShoot >= 0 {
 			if game.data.mode == "menu_game" {
@@ -577,7 +575,7 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 							game.debugInfos = append(game.debugInfos, debugInfo{p1: e.origin, p2: b.data.origin})
 						}
 
-						baseVelocity := entToBullet.Unit().Scaled(-4 * game.data.timescale)
+						baseVelocity := entToBullet.Unit().Scaled(-4 * game.timescale())
 
 						midColor := pixel.ToRGBA(e.color)
 						pos1 := pixel.V(1, 1).Rotated(e.orientation.Angle()).Scaled(e.radius).Add(e.origin)
@@ -619,6 +617,7 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 
 			game.data.entities[i] = e
 		}
+
 		game.data.timescale = math.Max(0.1, math.Min(256, closestEnemyDist)/256.0)
 
 		// TODO: Need to make the bullet grid force effect better with lots of bullets in one place
@@ -663,7 +662,7 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 				sprayVelocity := pixel.V(
 					math.Cos(b.particleEmissionAngle),
 					math.Sin(b.particleEmissionAngle),
-				).Unit().Scaled(v * game.data.timescale)
+				).Unit().Scaled(v * game.timescale())
 
 				color := colornames.Lightskyblue
 				pos := b.origin
@@ -1130,7 +1129,7 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 
 		// Keep buffered particles ticking so they don't stack up too much
 		for pID, p := range game.data.newParticles {
-			p.percentLife -= 1.0 / p.duration
+			p.percentLife -= 1.0 / p.duration * game.timescale()
 			game.data.newParticles[pID] = p
 		}
 		for pID, p := range game.data.particles {
@@ -1159,7 +1158,7 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 
 				p.orientation = p.velocity.Angle()
 
-				p.percentLife -= 1.0 / p.duration
+				p.percentLife -= 1.0 / p.duration * game.timescale()
 
 				speed := p.velocity.Len()
 				alpha := math.Min(1, math.Min(p.percentLife*2, speed*1.0))

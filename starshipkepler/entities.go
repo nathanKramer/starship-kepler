@@ -592,6 +592,9 @@ func (e *entityData) Update(dt float64, totalT float64, currTime time.Time) {
 }
 
 func (e *entityData) DrawDebug(entityID string, imd *imdraw.IMDraw, canvas *pixelgl.Canvas) {
+	if !e.alive {
+		return
+	}
 	e.text.Clear()
 	e.text.Orig = e.origin
 	e.text.Dot = e.origin
