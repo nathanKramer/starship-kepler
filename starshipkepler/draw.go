@@ -337,7 +337,7 @@ func DrawGame(win *pixelgl.Window, game *game, d *DrawContext) {
 		d.uiDraw.Clear()
 		d.uiDraw.Color = colornames.Black
 
-		if game.state == "paused" || game.data.mode == "menu_game" || game.state == "game_over" {
+		if game.state == "paused" || game.data.mode == "menu" || game.state == "game_over" {
 			a := (math.Min(game.totalTime, 4) / 8.0)
 			d.PrimaryCanvas.SetColorMask(pixel.Alpha(a))
 			d.uiCanvas.SetColorMask(pixel.Alpha(math.Min(1.0, a*4)))
@@ -370,7 +370,7 @@ func DrawGame(win *pixelgl.Window, game *game, d *DrawContext) {
 			}
 		}
 
-		if game.data.mode == "evolved" || game.data.mode == "pacifism" || game.data.mode == "menu_game" {
+		if game.data.mode == "evolved" || game.data.mode == "pacifism" || game.data.mode == "menu" {
 			// Draw: grid effect
 			// TODO, extract?
 			// Add catmullrom splines?

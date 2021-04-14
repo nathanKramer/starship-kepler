@@ -315,6 +315,7 @@ func (e *entityData) IntersectWithPlayer(
 			e.killedPlayer = true
 			player.alive = false
 			player.death = currTime
+			PlaySound("player/die")
 
 			for i := 0; i < 1200; i++ {
 				speed := 24.0 * (1.0 - 1/((rand.Float64()*32.0)+1))
@@ -334,7 +335,7 @@ func (e *entityData) IntersectWithPlayer(
 				)
 				game.data.newParticles = InlineAppendParticles(game.data.newParticles, p)
 			}
-			if game.data.mode == "menu_game" {
+			if game.data.mode == "menu" {
 				game.data.player = *NewPlayer(0.0, 0.0)
 				for entID, ent := range game.data.entities {
 					if !ent.alive {
@@ -347,6 +348,8 @@ func (e *entityData) IntersectWithPlayer(
 				game.data.lives--
 				if game.data.lives == 0 {
 					game.state = "game_over"
+
+					PlaySound("game/over")
 
 					for entID, ent := range game.data.entities {
 						if !ent.alive {

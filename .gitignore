@@ -3,3 +3,8 @@
 
 *.exe
 log.txt
+
+sound/samples
+
+starship-kepler
+starship-kepler.exe

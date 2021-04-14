@@ -1,13 +1,16 @@
 package starshipkepler
 
 import (
+	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/faiface/beep"
 	"github.com/faiface/beep/effects"
 	"github.com/faiface/beep/mp3"
 	"github.com/faiface/beep/speaker"
+	"github.com/faiface/beep/wav"
 )
 
 var soundFormat *beep.Format
@@ -50,10 +53,15 @@ type soundEffect struct {
 	volume float64
 }
 
+var musicStreamers = map[string]beep.StreamSeekCloser{}
 var soundEffects = map[string]*soundEffect{}
 
 func prepareStreamer(file string) (*beep.StreamSeekCloser, *beep.Format) {
-	sound, _ := os.Open(file)
+	sound, err := os.Open(file)
+	if err != nil {
+		panic(err)
+	}
+
 	streamer, format, err := mp3.Decode(sound)
 	if err != nil {
 		panic(err)
@@ -63,8 +71,26 @@ func prepareStreamer(file string) (*beep.StreamSeekCloser, *beep.Format) {
 }
 
 func prepareBuffer(file string) (*beep.Buffer, *beep.Format) {
-	sound, _ := os.Open(file)
-	streamer, format, err := mp3.Decode(sound)
+	sound, err := os.Open(file)
+	if err != nil {
+		panic(err)
+	}
+
+	ext := strings.Split(file, ".")[1]
+
+	var streamer beep.StreamSeekCloser
+	var format beep.Format
+
+	switch ext {
+	case "mp3":
+		streamer, format, err = mp3.Decode(sound)
+	case "wav":
+		streamer, format, err = wav.Decode(sound)
+	default:
+		errorString := fmt.Sprintf("Unsupported file extension: %s", ext)
+		panic(errorString)
+	}
+
 	if err != nil {
 		panic(err)
 	}
@@ -78,53 +104,18 @@ func prepareBuffer(file string) (*beep.Buffer, *beep.Format) {
 func init() {
 	// TODO:
 	// Unify how sounds are played, and make them driven by configuration
-	shotBuffer, shotSoundFormat = prepareBuffer("sound/shoot.mp3")
-	soundEffects["sound/shoot.mp3"] = &soundEffect{
-		buffer: shotBuffer,
-		volume: -0.9,
-	}
-
-	shotBuffer2, shotSoundFormat = prepareBuffer("sound/shoot2.mp3")
-	soundEffects["sound/shoot2.mp3"] = &soundEffect{
-		buffer: shotBuffer2,
-		volume: -0.7,
-	}
-
-	shotBuffer3, shotSoundFormat = prepareBuffer("sound/shoot3.mp3")
-	shotBuffer3.Streamer(0, shotBuffer3.Len())
-	soundEffects["sound/shoot3.mp3"] = &soundEffect{
-		buffer: shotBuffer3,
-		volume: -1.2,
-	}
-
-	shotBuffer4, shotSoundFormat = prepareBuffer("sound/shoot-mixed.mp3")
-	soundEffects["sound/shoot-mixed.mp3"] = &soundEffect{
-		buffer: shotBuffer4,
-		volume: -0.9,
-	}
-
-	spawnBuffer, _ = prepareBuffer("sound/spawn.mp3")
-	soundEffects["sound/spawn.mp3"] = &soundEffect{
-		buffer: spawnBuffer,
-		volume: -0.9,
-	}
-	// TODO: Use a real sound effect for this
-	soundEffects["menu/increment"] = &soundEffect{
-		buffer: spawnBuffer,
-		volume: -0.9,
-	}
 
 	spawnBuffer2, _ = prepareBuffer("sound/spawn2.mp3")
 	spawnBuffer3, _ = prepareBuffer("sound/spawn3.mp3")
 	spawnBuffer4, _ = prepareBuffer("sound/spawn4.mp3")
 	spawnBuffer5, _ = prepareBuffer("sound/spawn5.mp3")
-	snakeSpawnBuffer, _ = prepareBuffer("sound/snakespawn.mp3")
+	snakeSpawnBuffer, _ = prepareBuffer("sound/snake-spawn.mp3")
 
-	pinkSquareSpawnBuffer, _ = prepareBuffer("sound/snakespawn.mp3")
-	blackholeHitBuffer, _ = prepareBuffer("sound/blackholehit.mp3")
-	blackholeDieBuffer, _ = prepareBuffer("sound/blackholedie.mp3")
+	pinkSquareSpawnBuffer, _ = prepareBuffer("sound/snake-spawn.mp3")
+	blackholeHitBuffer, _ = prepareBuffer("sound/blackhole-hit.mp3")
+	blackholeDieBuffer, _ = prepareBuffer("sound/blackhole-die.mp3")
 
-	lifeBuffer, _ = prepareBuffer("sound/life.mp3")
+	lifeBuffer, _ = prepareBuffer("sound/player-life.mp3")
 	multiplierBuffer, _ = prepareBuffer("sound/multiplierbonus.mp3")
 	multiplierBuffer2, _ = prepareBuffer("sound/multiplierbonus2.mp3")
 	multiplierBuffer3, _ = prepareBuffer("sound/multiplierbonus3.mp3")
@@ -146,49 +137,104 @@ func init() {
 	multiplierSounds[9] = multiplierBuffer9
 	multiplierSounds[10] = multiplierBuffer10
 
-	bombBuffer, _ = prepareBuffer("sound/usebomb.mp3")
+	bombBuffer, _ = prepareBuffer("sound/player-bomb.mp3")
 
-	musicStreamer, soundFormat = prepareStreamer("sound/music.mp3")
-	pacifismMusicStreamer, soundFormat = prepareStreamer("sound/pacifismmusic.mp3")
-	menuMusicStreamer, soundFormat = prepareStreamer("sound/menumusic.mp3")
-	introStreamer, soundFormat = prepareStreamer("sound/intro.mp3")
+	initSounds()
+	initMusic()
+
 	speaker.Init(soundFormat.SampleRate, soundFormat.SampleRate.N(time.Second/10))
 }
 
-func PlayIntroMusic() {
-	speaker.Clear()
-	s := *introStreamer
-	s.Seek(0)
-	speaker.Play(s)
-	// defer s.Close()
+func initSounds() {
+	shotBuffer, shotSoundFormat = prepareBuffer("sound/shoot.mp3")
+	soundEffects["sound/shoot.mp3"] = &soundEffect{
+		buffer: shotBuffer,
+		volume: -0.9,
+	}
+
+	shotBuffer2, shotSoundFormat = prepareBuffer("sound/shoot2.mp3")
+	soundEffects["sound/shoot2.mp3"] = &soundEffect{
+		buffer: shotBuffer2,
+		volume: -0.7,
+	}
+
+	shotBuffer3, shotSoundFormat = prepareBuffer("sound/shoot3.mp3")
+	shotBuffer3.Streamer(0, shotBuffer3.Len())
+	soundEffects["sound/shoot3.mp3"] = &soundEffect{
+		buffer: shotBuffer3,
+		volume: -1.2,
+	}
+
+	shotBuffer4, shotSoundFormat = prepareBuffer("sound/shoot4.mp3")
+	soundEffects["sound/shoot-mixed.mp3"] = &soundEffect{
+		buffer: shotBuffer4,
+		volume: -0.9,
+	}
+
+	spawnBuffer, _ = prepareBuffer("sound/menu-step.wav")
+	soundEffects["menu/step"] = &soundEffect{
+		buffer: spawnBuffer,
+		volume: -0.9,
+	}
+
+	spawnBuffer, _ = prepareBuffer("sound/menu-confirm.wav")
+	soundEffects["menu/confirm"] = &soundEffect{
+		buffer: spawnBuffer,
+		volume: -0.9,
+	}
+
+	buffer, _ := prepareBuffer("sound/player-die.wav")
+	soundEffects["player/die"] = &soundEffect{
+		buffer: buffer,
+		volume: -0.8,
+	}
+
+	buffer, _ = prepareBuffer("sound/game-over.wav")
+	soundEffects["game/over"] = &soundEffect{
+		buffer: buffer,
+		volume: -1.0,
+	}
+
+	spawnBuffer, _ = prepareBuffer("sound/spawn.mp3")
+	soundEffects["sound/spawn.mp3"] = &soundEffect{
+		buffer: spawnBuffer,
+		volume: -0.9,
+	}
 }
 
-func PlayPacifismMusic() {
-	speaker.Clear()
-	s := *pacifismMusicStreamer
-	s.Seek(0)
-	speaker.Play(s)
-	// defer s.Close()
+func initMusic() {
+	musicStreamer, _ := prepareStreamer("sound/music-evolved.mp3")
+	musicStreamers["evolved"] = *musicStreamer
+
+	musicStreamer, _ = prepareStreamer("sound/music-pacifism.mp3")
+	musicStreamers["pacifism"] = *musicStreamer
+
+	musicStreamer, _ = prepareStreamer("sound/music-menu.mp3")
+	musicStreamers["menu"] = *musicStreamer
+
+	musicStreamer, soundFormat = prepareStreamer("sound/music-intro.mp3")
+	musicStreamers["intro"] = *musicStreamer
 }
 
-func PlayMenuMusic() {
+func PlaySong(songName string) {
 	speaker.Clear()
-	s := *menuMusicStreamer
-	s.Seek(0)
-	speaker.Play(s)
-	// defer s.Close()
-}
+	s, ok := musicStreamers[songName]
+	if !ok {
+		errorString := fmt.Sprintf("Unknown sound: %s", songName)
+		panic(errorString)
+	}
 
-func PlayMusic() {
-	speaker.Clear()
-	s := *musicStreamer
 	s.Seek(0)
 	speaker.Play(s)
-	// defer s.Close()
 }
 
 func PlaySound(soundName string) {
-	soundEffect := soundEffects[soundName]
+	soundEffect, ok := soundEffects[soundName]
+	if !ok {
+		errorString := fmt.Sprintf("Unknown sound: %s", soundName)
+		panic(errorString)
+	}
+
 	sound := soundEffect.buffer.Streamer(0, soundEffect.buffer.Len())
 
 	volume := &effects.Volume{
@@ -197,5 +243,7 @@ func PlaySound(soundName string) {
 		Volume:   soundEffect.volume,
 		Silent:   false,
 	}
+
+	fmt.Printf("[SoundPlayer] %s\n", soundName)
 	speaker.Play(volume)
 }

@@ -256,7 +256,7 @@ func NewGameData() *gamedata {
 
 func NewMenuGame() *gamedata {
 	data := NewGameData()
-	data.mode = "menu_game"
+	data.mode = "menu"
 	data.timescale = 0.4
 	data.weapon = *NewBurstWeapon()
 	data.multiplierReward = 25 // kills
@@ -388,6 +388,12 @@ func (data *gamedata) respawnPlayer() {
 
 func (data *gamedata) AmbientSpawnFreq() float64 {
 	return data.ambientSpawnFreq * data.timescale
+}
+
+func (game *game) PlayGameMusic() {
+	if game.music {
+		PlaySong(game.data.mode)
+	}
 }
 
 func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime float64, player *entityData) {

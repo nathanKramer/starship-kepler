@@ -68,11 +68,10 @@ func run() {
 
 	draw := starshipkepler.NewDrawContext(cfg)
 	game := starshipkepler.NewGame()
+	game.PlayGameMusic()
 	uiContext := starshipkepler.NewUi(win)
 
 	// Todo - move this type of stuff somewhere else
-	starshipkepler.PlayMenuMusic()
-
 	for !win.Closed() {
 		// TODO: Put this scaled mouse position code in either ui or game.
 		// Can probably ditch the depenency on the canvas?
