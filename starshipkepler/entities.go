@@ -167,17 +167,18 @@ func InlineAppendEntities(
 			continue
 		}
 
-		bulletID := 0
+		entId := 0
+
 		if len(entities) < cap(entities) {
 			entities = append(entities, newEntity)
 		} else {
-			for bulletID < len(entities) {
-				existing := entities[bulletID]
-				if existing.entityType == "" {
-					entities[bulletID] = newEntity
+			for entId < len(entities) {
+				existing := entities[entId]
+				if existing.entityType == "" || (!existing.alive && !existing.spawning) {
+					entities[entId] = newEntity
 					break
 				}
-				bulletID++
+				entId++
 			}
 		}
 	}
@@ -312,7 +313,7 @@ func (e *entityData) IntersectWithPlayer(
 		}
 
 		// player died
-		if !warded {
+		if !warded && !g_debug {
 			e.killedPlayer = true
 			player.alive = false
 			player.death = currTime

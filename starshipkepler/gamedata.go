@@ -398,7 +398,7 @@ func (game *game) PlayGameMusic() {
 
 func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime float64, player *entityData) {
 	// ambient spawns
-	if !debug && last.Sub(game.data.lastSpawn).Seconds() > game.data.AmbientSpawnFreq() && game.data.spawning {
+	if last.Sub(game.data.lastSpawn).Seconds() > game.data.AmbientSpawnFreq() && game.data.spawning {
 		// spawn
 		spawns := make([]entityData, 0, game.data.spawnCount)
 		for i := 0; i < game.data.spawnCount; i++ {
@@ -435,7 +435,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 		}
 
 		PlaySpawnSounds(spawns)
-		game.data.entities = append(game.data.entities, spawns...)
+		game.data.newEntities = InlineAppendEntities(game.data.newEntities, spawns...)
 		game.data.spawns += len(spawns)
 		game.data.lastSpawn = time.Now()
 
@@ -461,7 +461,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 	subsequentWave := (game.data.lastWave != (time.Time{}) &&
 		(last.Sub(game.data.lastWave).Seconds() >= game.data.waveFreq) || waveDead)
 
-	if !debug && (firstWave || subsequentWave) {
+	if firstWave || subsequentWave {
 		// New wave, so re-assess wave frequency etc in case it was set by a custom wave
 		game.data.ambientSpawnFreq = math.Max(
 			1.0,
@@ -770,7 +770,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 
 func (game *game) pacifismGameModeUpdate(debug bool, last time.Time, totalTime float64, player *entityData) {
 	// ambient spawns
-	if !debug && last.Sub(game.data.lastSpawn).Seconds() > game.data.AmbientSpawnFreq() && game.data.spawning {
+	if last.Sub(game.data.lastSpawn).Seconds() > game.data.AmbientSpawnFreq() && game.data.spawning {
 		// spawn
 		spawns := make([]entityData, 0, game.data.spawnCount)
 		corners := [4]pixel.Vec{

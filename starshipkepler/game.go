@@ -1212,12 +1212,16 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 		}
 		killedEnt := 0
 		for entID, existing := range game.data.entities {
-			if (!existing.alive && existing.born != time.Time{}) || (existing.expiry != time.Time{}) && game.lastFrame.After(existing.expiry) {
+			died := (!existing.alive && existing.born != time.Time{})
+			expired := (existing.expiry != time.Time{}) && game.lastFrame.After(existing.expiry)
+			if died || expired {
 				game.data.entities[entID] = entityData{}
 				killedEnt++
 			} // kill entities
 		}
-		// fmt.Printf("Killed\t(%d entities)\t(%d particles)\n", killedEnt, killedParticles)
+		if killedEnt > 0 {
+			fmt.Printf("Killed\t(%d entities)\n", killedEnt)
+		}
 
 		particleID := 0
 		for addedID, newParticle := range game.data.newParticles {
