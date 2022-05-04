@@ -390,6 +390,10 @@ func (data *gamedata) AmbientSpawnFreq() float64 {
 	return data.ambientSpawnFreq * data.timescale
 }
 
+func (data *gamedata) WaveFreq() float64 {
+	return data.waveFreq * data.timescale
+}
+
 func (game *game) PlayGameMusic() {
 	if game.music {
 		PlaySong(game.data.mode)
@@ -398,6 +402,7 @@ func (game *game) PlayGameMusic() {
 
 func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime float64, player *entityData) {
 	// ambient spawns
+	// This spawns between 1 and 4 enemies every AmbientSpawnFreq seconds
 	if last.Sub(game.data.lastSpawn).Seconds() > game.data.AmbientSpawnFreq() && game.data.spawning {
 		// spawn
 		spawns := make([]entityData, 0, game.data.spawnCount)
@@ -459,8 +464,9 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 	waveDead := livingEntities == 0 && (game.data.pendingSpawns == 0 && !game.data.spawning)
 	firstWave := game.data.lastWave == (time.Time{}) && totalTime >= 2
 	subsequentWave := (game.data.lastWave != (time.Time{}) &&
-		(last.Sub(game.data.lastWave).Seconds() >= game.data.waveFreq) || waveDead)
+		(last.Sub(game.data.lastWave).Seconds() >= game.data.WaveFreq()) || waveDead)
 
+	// waves happen every waveFreq seconds
 	if firstWave || subsequentWave {
 		// New wave, so re-assess wave frequency etc in case it was set by a custom wave
 		game.data.ambientSpawnFreq = math.Max(
