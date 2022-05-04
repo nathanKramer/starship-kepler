@@ -6,4 +6,6 @@ Based on Geometry Wars & Magicka Wizard Wars
 
 ## Gameplay
 
+Here is a gameplay video:
+
 [![Gameplay video](https://img.youtube.com/vi/WSXLzUnanZQ/0.jpg)](https://www.youtube.com/watch?v=WSXLzUnanZQ)
