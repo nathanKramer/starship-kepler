@@ -1224,20 +1224,22 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 
 		particleID := 0
 		for addedID, newParticle := range game.data.newParticles {
-			if newParticle != (particle{}) {
-				if len(game.data.particles) < cap(game.data.particles) {
-					game.data.particles = append(game.data.particles, newParticle)
-					game.data.newParticles[addedID] = particle{}
-				} else {
-					for particleID < len(game.data.particles) {
-						existing := game.data.particles[particleID]
-						if existing == (particle{}) {
-							game.data.particles[particleID] = newParticle
-							game.data.newParticles[addedID] = particle{}
-							break
-						}
-						particleID++
+			if newParticle == (particle{}) {
+				continue
+			}
+
+			if len(game.data.particles) < cap(game.data.particles) {
+				game.data.particles = append(game.data.particles, newParticle)
+				game.data.newParticles[addedID] = particle{}
+			} else {
+				for particleID < len(game.data.particles) {
+					existing := game.data.particles[particleID]
+					if existing == (particle{}) {
+						game.data.particles[particleID] = newParticle
+						game.data.newParticles[addedID] = particle{}
+						break
 					}
+					particleID++
 				}
 			}
 		}
@@ -1246,24 +1248,26 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 		toSpawn := 0
 		spawnedEnt := 0
 		for addedID, newEnt := range game.data.newEntities {
-			if newEnt.entityType != "" {
-				toSpawn++
-				if len(game.data.entities) < cap(game.data.entities) {
-					game.data.entities = append(game.data.entities, newEnt)
-					game.data.newEntities[addedID] = entityData{}
-					spawnedEnt++
-					entID++
-				} else {
-					for entID < len(game.data.entities) {
-						existing := game.data.entities[entID]
-						if existing.origin == (pixel.Vec{}) {
-							game.data.entities[entID] = newEnt
-							game.data.newEntities[addedID] = entityData{}
-							spawnedEnt++
-							break
-						}
-						entID++
+			if newEnt.entityType == "" {
+				continue
+			}
+
+			toSpawn++
+			if len(game.data.entities) < cap(game.data.entities) {
+				game.data.entities = append(game.data.entities, newEnt)
+				game.data.newEntities[addedID] = entityData{}
+				spawnedEnt++
+				entID++
+			} else {
+				for entID < len(game.data.entities) {
+					existing := game.data.entities[entID]
+					if existing.origin == (pixel.Vec{}) {
+						game.data.entities[entID] = newEnt
+						game.data.newEntities[addedID] = entityData{}
+						spawnedEnt++
+						break
 					}
+					entID++
 				}
 			}
 		} // bring in new entities

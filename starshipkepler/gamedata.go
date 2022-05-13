@@ -401,6 +401,7 @@ func (game *game) PlayGameMusic() {
 }
 
 func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime float64, player *entityData) {
+	updateMusic(game.data.mode)
 	// ambient spawns
 	// This spawns between 1 and 4 enemies every AmbientSpawnFreq seconds
 	if last.Sub(game.data.lastSpawn).Seconds() > game.data.AmbientSpawnFreq() && game.data.spawning {
@@ -488,7 +489,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 			pixel.V((worldWidth/2)-80, (worldHeight/2)-80),
 		}
 
-		if (rand.Float64() * (0.1 + math.Min(game.data.notoriety, 0.8))) > 0.35 {
+		if (rand.Float64() * (0.1 + math.Min(game.data.notoriety, 0.8))) > 0.5 {
 			game.data.spawning = true
 		}
 

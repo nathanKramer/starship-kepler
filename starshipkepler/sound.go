@@ -234,6 +234,12 @@ func initMusic() {
 	musicStreamers["intro"] = *musicStreamer
 }
 
+func updateMusic(songName string) {
+	if musicStreamers[songName].Position() == musicStreamers[songName].Len() {
+		PlaySong(songName)
+	}
+}
+
 func PlaySong(songName string) {
 	speaker.Clear()
 	s, ok := musicStreamers[songName]
