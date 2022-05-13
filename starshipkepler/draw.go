@@ -843,49 +843,49 @@ func DrawGame(win *pixelgl.Window, game *game, d *DrawContext) {
 			fmt.Fprintf(d.livesTxt, txt, game.data.bombs)
 
 			// draw: UI
-			uiOrigin := pixel.V(-win.Bounds().W()/2+128, -win.Bounds().H()/2+192)
+			// uiOrigin := pixel.V(-win.Bounds().W()/2+128, -win.Bounds().H()/2+192)
 
 			// WASD
-			d.imd.Color = colornames.Black
-			d.imd.Push(uiOrigin.Add(pixel.V(50, 0)))
-			d.imd.Circle(20.0, 0)
+			// d.imd.Color = colornames.Black
+			// d.imd.Push(uiOrigin.Add(pixel.V(50, 0)))
+			// d.imd.Circle(20.0, 0)
 
-			d.imd.Push(uiOrigin.Add(pixel.V(10, -50)))
-			d.imd.Circle(20.0, 0)
+			// d.imd.Push(uiOrigin.Add(pixel.V(10, -50)))
+			// d.imd.Circle(20.0, 0)
 
-			d.imd.Push(uiOrigin.Add(pixel.V(60, -50)))
-			d.imd.Circle(20.0, 0)
+			// d.imd.Push(uiOrigin.Add(pixel.V(60, -50)))
+			// d.imd.Circle(20.0, 0)
 
-			d.imd.Push(uiOrigin.Add(pixel.V(110, -50)))
-			d.imd.Circle(20.0, 0)
+			// d.imd.Push(uiOrigin.Add(pixel.V(110, -50)))
+			// d.imd.Circle(20.0, 0)
 
-			d.imd.Color = elementWaterColor
-			d.imd.Push(uiOrigin)
-			d.imd.Circle(20.0, 0)
+			// d.imd.Color = elementWaterColor
+			// d.imd.Push(uiOrigin)
+			// d.imd.Circle(20.0, 0)
 
-			d.imd.Color = elementChaosColor
-			d.imd.Push(uiOrigin.Add(pixel.V(100, 0)))
-			d.imd.Circle(20.0, 0)
+			// d.imd.Color = elementChaosColor
+			// d.imd.Push(uiOrigin.Add(pixel.V(100, 0)))
+			// d.imd.Circle(20.0, 0)
 
-			d.imd.Color = elementSpiritColor
-			d.imd.Push(uiOrigin.Add(pixel.V(150, 0)))
-			d.imd.Circle(20.0, 0)
+			// d.imd.Color = elementSpiritColor
+			// d.imd.Push(uiOrigin.Add(pixel.V(150, 0)))
+			// d.imd.Circle(20.0, 0)
 
-			d.imd.Color = elementFireColor
-			d.imd.Push(uiOrigin.Add(pixel.V(160, -50)))
-			d.imd.Circle(20.0, 0)
+			// d.imd.Color = elementFireColor
+			// d.imd.Push(uiOrigin.Add(pixel.V(160, -50)))
+			// d.imd.Circle(20.0, 0)
 
-			d.imd.Color = elementLightningColor
-			d.imd.Push(uiOrigin.Add(pixel.V(20, -100)))
-			d.imd.Circle(20.0, 0)
+			// d.imd.Color = elementLightningColor
+			// d.imd.Push(uiOrigin.Add(pixel.V(20, -100)))
+			// d.imd.Circle(20.0, 0)
 
-			d.imd.Color = elementWindColor
-			d.imd.Push(uiOrigin.Add(pixel.V(70, -100)))
-			d.imd.Circle(20.0, 0)
+			// d.imd.Color = elementWindColor
+			// d.imd.Push(uiOrigin.Add(pixel.V(70, -100)))
+			// d.imd.Circle(20.0, 0)
 
-			d.imd.Color = elementLifeColor
-			d.imd.Push(uiOrigin.Add(pixel.V(120, -100)))
-			d.imd.Circle(20.0, 0)
+			// d.imd.Color = elementLifeColor
+			// d.imd.Push(uiOrigin.Add(pixel.V(120, -100)))
+			// d.imd.Circle(20.0, 0)
 			// imd.Color = elementFireColor
 			// imd.Push(uiOrigin.Add(pixel.V(160, -50)))
 			// imd.Circle(20.0, 0)
