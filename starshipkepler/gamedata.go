@@ -466,6 +466,9 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 	subsequentWave := (game.data.lastWave != (time.Time{}) &&
 		(last.Sub(game.data.lastWave).Seconds() >= game.data.WaveFreq()) || waveDead)
 
+	// spawnCount + wave N
+	spawns := make([]entityData, 0, 200)
+
 	// waves happen every waveFreq seconds
 	if firstWave || subsequentWave {
 		// New wave, so re-assess wave frequency etc in case it was set by a custom wave
@@ -474,7 +477,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 			3-((float64(game.data.spawns)/30.0)*0.5),
 		)
 		game.data.waveFreq = math.Max(
-			5.0, 30.0-(3*game.data.notoriety),
+			5.0, 20.0-(3*game.data.notoriety),
 		)
 
 		game.data.spawning = false
@@ -484,15 +487,19 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 			pixel.V((worldWidth/2)-80, -(worldHeight/2)+80),
 			pixel.V((worldWidth/2)-80, (worldHeight/2)-80),
 		}
+
+		if (rand.Float64() * (0.1 + math.Min(game.data.notoriety, 0.8))) > 0.35 {
+			game.data.spawning = true
+		}
+
 		// one-off landing party
-		r := rand.Float64() * (0.2 + math.Min(game.data.notoriety, 0.8))
-		spawns := make([]entityData, 0, game.data.spawnCount)
+		r := rand.Float64() * (0.1 + math.Min(game.data.notoriety, 0.8))
 		fmt.Printf("[LandingPartySpawn] %f %s\n", r, time.Now().String())
 		// landing party spawn
 		{
 			if r <= 0.1 {
 				// if we roll 0.1, just do a wave of ambient spawning
-				game.data.waveFreq = 10
+				game.data.waveFreq = 5
 				game.data.spawning = true
 			} else if r <= 0.25 {
 				count := 2 + rand.Intn(4)
@@ -504,7 +511,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 					)
 					spawns = append(spawns, *enemy)
 				}
-			} else if r <= 0.28 {
+			} else if r <= 0.3 {
 				count := 2 + rand.Intn(4)
 				for i := 0; i < count; i++ {
 					p := corners[i%4]
@@ -514,7 +521,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 					)
 					spawns = append(spawns, *enemy)
 				}
-			} else if r <= 0.33 {
+			} else if r <= 0.35 {
 				count := 8 + rand.Intn(4)
 				for i := 0; i < count; i++ {
 					p := corners[i%4]
@@ -524,25 +531,32 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 					)
 					spawns = append(spawns, *enemy)
 				}
-			} else if r <= 0.4 {
-				r := rand.Intn(4)
+			} else if r <= 0.55 {
+				r := rand.Float64() * (0.1 + math.Min(game.data.notoriety, 0.8))
 				var t string
 				var freq float64
 				var duration float64
-				switch r {
-				case 0:
+				if r <= 0.15 {
+					t = "wanderer"
+					freq = 0.3
+					duration = 3.0
+				} else if r <= 0.3 {
 					t = "follower"
 					freq = 0.5
 					duration = 10.0
-				case 1:
+				} else if r <= 0.5 {
 					t = "dodger"
 					freq = 0.25
 					duration = 3.0
-				case 2:
+				} else if r <= 0.6 {
 					t = "pink"
 					freq = 0.2
 					duration = 1.0
-				case 3:
+				} else if r <= 0.6 {
+					t = "follower"
+					freq = 0.25
+					duration = 5.0
+				} else {
 					t = "replicator"
 					freq = 0.2
 					duration = 5.0
@@ -555,7 +569,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 			} else if r <= 0.55 {
 				total := 8.0
 				step := 360.0 / total
-				for i := 0.0; i < total; i++ {
+				for i := 0.0; i < total; i++ { // circle of followers
 					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
 					spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(450.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
 					spawns = append(
@@ -567,7 +581,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 			} else if r <= 0.575 {
 				total := 8.0
 				step := 360.0 / total
-				for i := 0.0; i < total; i++ {
+				for i := 0.0; i < total; i++ { // circle of dodgers
 					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
 					spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(450.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
 					spawns = append(
@@ -579,7 +593,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 			} else if r <= 0.6 {
 				total := 5.0
 				step := 360.0 / total
-				for i := 0.0; i < total; i++ {
+				for i := 0.0; i < total; i++ { // circle of replicators
 					for j := 0; j < 16; j++ {
 						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0).Add(randomVector(16.0)).Add(player.origin)
 						spawns = append(
@@ -591,7 +605,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 			} else if r <= 0.64 {
 				total := 10.0
 				step := 360.0 / total
-				for i := 0.0; i < total; i++ {
+				for i := 0.0; i < total; i++ { // circle of snakes
 					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
 					spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(550.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
 					spawns = append(
@@ -603,7 +617,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 			} else if r <= 0.67 {
 				total := 4.0
 				step := 360.0 / total
-				for i := 0.0; i < total; i++ {
+				for i := 0.0; i < total; i++ { // circle of pink squares
 					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(450.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
 					spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
 					spawns = append(
@@ -613,7 +627,8 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 					)
 				}
 			} else if r <= 0.75 {
-				for _, corner := range corners {
+				game.data.spawning = false       // corner spawns will feel like a bit of a breather
+				for _, corner := range corners { // corner spawns
 					blackhole := NewBlackHole(
 						corner.X,
 						corner.Y,
@@ -637,7 +652,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 			} else if r <= 0.85 {
 				total := 4.0
 				step := 360.0 / total
-				for i := 0.0; i < total; i++ {
+				for i := 0.0; i < total; i++ { // circle of blackholes
 					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
 					spawns = append(
 						spawns,
@@ -647,7 +662,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 			} else {
 				total := 14.0
 				step := 360.0 / total
-				for i := 0.0; i < total; i++ {
+				for i := 0.0; i < total; i++ { // big circle of followers
 					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
 					spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(650.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
 					spawns = append(
@@ -659,15 +674,12 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 			}
 		}
 
-		// spawn entitites
-		PlaySpawnSounds(spawns)
-		game.data.spawns += len(spawns)
-		game.data.newEntities = InlineAppendEntities(game.data.newEntities, spawns...)
 		game.data.lastWave = last
 	}
 
 	for waveID, wave := range game.data.waves {
-		if (wave.waveStart == time.Time{} || wave.waveEnd != time.Time{}) {
+		if (wave.waveStart == time.Time{}) {
+			// fmt.Printf("[WaveSkip] %s, %f, %f", wave.entityType, wave.waveDuration, last.Sub(wave.waveStart).Seconds())
 			continue
 		}
 		if last.Sub(wave.waveStart).Seconds() >= wave.waveDuration { // If a wave has ended
@@ -683,7 +695,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 			// TODO make these data driven
 			// waves would have spawn points, and spawn counts, and probably durations and stuff
 			// hardcoded for now :D
-			fmt.Printf("[WaveTick] %s %s\n", wave.entityType, time.Now().String())
+			// fmt.Printf("[WaveTick] %s %s\n", wave.entityType, time.Now().String())
 
 			if last.Sub(wave.lastSpawn).Seconds() > wave.spawnFreq {
 				// 4 spawn points
@@ -694,7 +706,6 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 					pixel.V((worldWidth/2)-32, (worldHeight/2)-32),
 				}
 
-				spawns := make([]entityData, 100)
 				for _, p := range points {
 					var enemy *entityData
 					if wave.entityType == "follower" { // dictionary lookup?
@@ -717,18 +728,27 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 							p.X,
 							p.Y,
 						)
+					} else if wave.entityType == "wanderer" {
+						enemy = NewWanderer(
+							p.X,
+							p.Y,
+						)
+					} else {
+						panic(fmt.Errorf("Unhandled entity type: %s", wave.entityType))
 					}
 					spawns = append(spawns, *enemy)
 				}
 
-				PlaySpawnSounds(spawns)
-				game.data.entities = append(game.data.entities, spawns...)
-				game.data.spawns += len(spawns)
 				wave.lastSpawn = time.Now()
 				game.data.waves[waveID] = wave
 			}
 		}
 	}
+
+	// spawn entitites
+	PlaySpawnSounds(spawns)
+	game.data.spawns += len(spawns)
+	game.data.newEntities = InlineAppendEntities(game.data.newEntities, spawns...)
 
 	// adjust game rules
 
