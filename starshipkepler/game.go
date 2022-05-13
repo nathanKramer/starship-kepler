@@ -1,7 +1,6 @@
 package starshipkepler
 
 import (
-	"fmt"
 	"math"
 	"math/rand"
 	"runtime"
@@ -22,15 +21,15 @@ func (game *game) timescale() float64 {
 func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 
 	if game.lastFrame.Sub(game.lastMemCheck).Seconds() > 5.0 {
-		PrintMemUsage()
-		fmt.Printf("Entities\tlen: %d\tcap: %d\n", len(game.data.entities), cap(game.data.entities))
-		fmt.Printf("New Entities\tlen: %d\tcap: %d\n\n", len(game.data.newEntities), cap(game.data.newEntities))
+		// PrintMemUsage()
+		// fmt.Printf("Entities\tlen: %d\tcap: %d\n", len(game.data.entities), cap(game.data.entities))
+		// fmt.Printf("New Entities\tlen: %d\tcap: %d\n\n", len(game.data.newEntities), cap(game.data.newEntities))
 
-		fmt.Printf("Bullets\tlen: %d\tcap: %d\n", len(game.data.bullets), cap(game.data.bullets))
-		fmt.Printf("New Bullets\tlen: %d\tcap: %d\n\n", len(game.data.newBullets), cap(game.data.newBullets))
+		// fmt.Printf("Bullets\tlen: %d\tcap: %d\n", len(game.data.bullets), cap(game.data.bullets))
+		// fmt.Printf("New Bullets\tlen: %d\tcap: %d\n\n", len(game.data.newBullets), cap(game.data.newBullets))
 
-		fmt.Printf("Particles\tlen: %d\tcap: %d\n", len(game.data.particles), cap(game.data.particles))
-		fmt.Printf("New Particles\tlen: %d\tcap: %d\n\n", len(game.data.newParticles), cap(game.data.newParticles))
+		// fmt.Printf("Particles\tlen: %d\tcap: %d\n", len(game.data.particles), cap(game.data.particles))
+		// fmt.Printf("New Particles\tlen: %d\tcap: %d\n\n", len(game.data.newParticles), cap(game.data.newParticles))
 
 		game.lastMemCheck = game.lastFrame
 
@@ -1219,9 +1218,9 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 				killedEnt++
 			} // kill entities
 		}
-		if killedEnt > 0 {
-			fmt.Printf("Killed\t(%d entities)\n", killedEnt)
-		}
+		// if killedEnt > 0 {
+		// 	fmt.Printf("Killed\t(%d entities)\n", killedEnt)
+		// }
 
 		particleID := 0
 		for addedID, newParticle := range game.data.newParticles {

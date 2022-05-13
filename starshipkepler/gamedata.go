@@ -485,10 +485,9 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 			pixel.V((worldWidth/2)-80, (worldHeight/2)-80),
 		}
 		// one-off landing party
-		fmt.Printf("[LandingPartySpawn] %s\n", time.Now().String())
 		r := rand.Float64() * (0.2 + math.Min(game.data.notoriety, 0.8))
 		spawns := make([]entityData, 0, game.data.spawnCount)
-
+		fmt.Printf("[LandingPartySpawn] %f %s\n", r, time.Now().String())
 		// landing party spawn
 		{
 			if r <= 0.1 {
@@ -515,7 +514,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 					)
 					spawns = append(spawns, *enemy)
 				}
-			} else if r <= 0.35 {
+			} else if r <= 0.33 {
 				count := 8 + rand.Intn(4)
 				for i := 0; i < count; i++ {
 					p := corners[i%4]
@@ -525,7 +524,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 					)
 					spawns = append(spawns, *enemy)
 				}
-			} else if r <= 0.5 {
+			} else if r <= 0.4 {
 				r := rand.Intn(4)
 				var t string
 				var freq float64
@@ -548,6 +547,8 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 					freq = 0.2
 					duration = 5.0
 				}
+
+				fmt.Printf("[Wave]: Creating a wave %s, %f, %f\n", t, freq, duration)
 
 				game.data.waves = append(game.data.waves, *NewWaveData(t, freq, duration))
 				game.data.lastWave = last
@@ -665,65 +666,69 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 		game.data.lastWave = last
 	}
 
-	// for waveID, wave := range game.data.waves {
-	// 	if (wave.waveStart != time.Time{} && wave.waveEnd == time.Time{}) {
-	// 		if last.Sub(wave.waveStart).Seconds() >= wave.waveDuration { // If a wave has ended
-	// 			// End the wave
-	// 			fmt.Printf("[WaveEnd] %s\n", time.Now().String())
-	// 			wave.waveEnd = time.Now()
-	// 			wave.waveStart = time.Time{}
-	// 			game.data.waves[waveID] = wave
-	// 		} else if last.Sub(wave.waveStart).Seconds() < wave.waveDuration {
-	// 			// Continue wave
-	// 			// TODO make these data driven
-	// 			// waves would have spawn points, and spawn counts, and probably durations and stuff
-	// 			// hardcoded for now :D
+	for waveID, wave := range game.data.waves {
+		if (wave.waveStart == time.Time{} || wave.waveEnd != time.Time{}) {
+			continue
+		}
+		if last.Sub(wave.waveStart).Seconds() >= wave.waveDuration { // If a wave has ended
+			// End the wave
+			fmt.Printf("[WaveEnd] %s\n", time.Now().String())
+			wave.waveEnd = time.Now()
+			wave.waveStart = time.Time{}
+			game.data.waves[waveID] = wave
+			continue
+		}
+		if last.Sub(wave.waveStart).Seconds() < wave.waveDuration {
+			// Continue wave
+			// TODO make these data driven
+			// waves would have spawn points, and spawn counts, and probably durations and stuff
+			// hardcoded for now :D
+			fmt.Printf("[WaveTick] %s %s\n", wave.entityType, time.Now().String())
 
-	// 			if last.Sub(wave.lastSpawn).Seconds() > wave.spawnFreq {
-	// 				// 4 spawn points
-	// 				points := [4]pixel.Vec{
-	// 					pixel.V(-(worldWidth/2)+32, -(worldHeight/2)+32),
-	// 					pixel.V(-(worldWidth/2)+32, (worldHeight/2)-32),
-	// 					pixel.V((worldWidth/2)-32, -(worldHeight/2)+32),
-	// 					pixel.V((worldWidth/2)-32, (worldHeight/2)-32),
-	// 				}
+			if last.Sub(wave.lastSpawn).Seconds() > wave.spawnFreq {
+				// 4 spawn points
+				points := [4]pixel.Vec{
+					pixel.V(-(worldWidth/2)+32, -(worldHeight/2)+32),
+					pixel.V(-(worldWidth/2)+32, (worldHeight/2)-32),
+					pixel.V((worldWidth/2)-32, -(worldHeight/2)+32),
+					pixel.V((worldWidth/2)-32, (worldHeight/2)-32),
+				}
 
-	// 				spawns := make([]entityData, 100)
-	// 				for _, p := range points {
-	// 					var enemy *entityData
-	// 					if wave.entityType == "follower" { // dictionary lookup?
-	// 						enemy = NewFollower(
-	// 							p.X,
-	// 							p.Y,
-	// 						)
-	// 					} else if wave.entityType == "dodger" {
-	// 						enemy = NewDodger(
-	// 							p.X,
-	// 							p.Y,
-	// 						)
-	// 					} else if wave.entityType == "pink" {
-	// 						enemy = NewPinkSquare(
-	// 							p.X,
-	// 							p.Y,
-	// 						)
-	// 					} else if wave.entityType == "replicator" {
-	// 						enemy = NewReplicator(
-	// 							p.X,
-	// 							p.Y,
-	// 						)
-	// 					}
-	// 					spawns = append(spawns, *enemy)
-	// 				}
+				spawns := make([]entityData, 100)
+				for _, p := range points {
+					var enemy *entityData
+					if wave.entityType == "follower" { // dictionary lookup?
+						enemy = NewFollower(
+							p.X,
+							p.Y,
+						)
+					} else if wave.entityType == "dodger" {
+						enemy = NewDodger(
+							p.X,
+							p.Y,
+						)
+					} else if wave.entityType == "pink" {
+						enemy = NewPinkSquare(
+							p.X,
+							p.Y,
+						)
+					} else if wave.entityType == "replicator" {
+						enemy = NewReplicator(
+							p.X,
+							p.Y,
+						)
+					}
+					spawns = append(spawns, *enemy)
+				}
 
-	// 				PlaySpawnSounds(spawns)
-	// 				game.data.entities = append(game.data.entities, spawns...)
-	// 				game.data.spawns += len(spawns)
-	// 				wave.lastSpawn = time.Now()
-	// 				game.data.waves[waveID] = wave
-	// 			}
-	// 		}
-	// 	}
-	// }
+				PlaySpawnSounds(spawns)
+				game.data.entities = append(game.data.entities, spawns...)
+				game.data.spawns += len(spawns)
+				wave.lastSpawn = time.Now()
+				game.data.waves[waveID] = wave
+			}
+		}
+	}
 
 	// adjust game rules
 

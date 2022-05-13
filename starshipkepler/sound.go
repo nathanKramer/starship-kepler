@@ -262,6 +262,6 @@ func PlaySound(soundName string) {
 		Silent:   false,
 	}
 
-	fmt.Printf("[SoundPlayer] %s\n", soundName)
+	// fmt.Printf("[SoundPlayer] %s\n", soundName)
 	speaker.Play(volume)
 }

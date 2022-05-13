@@ -54,7 +54,7 @@ func run() {
 		cfg.Monitor = monitor
 	}
 
-	debug := false
+	debug := true
 	if debug {
 		cfg.Bounds = pixel.R(0, 0, 1024, 768)
 		cfg.Maximized = false
