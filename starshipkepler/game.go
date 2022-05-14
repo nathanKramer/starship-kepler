@@ -83,6 +83,10 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 		if playerConfirmed {
 			PlaySound("menu/confirm")
 			switch game.menu.options[game.menu.selection] {
+			case "Development":
+				game.state = "starting"
+				game.data = *NewDevelopmentGame()
+
 			case "Story Mode":
 				game.state = "starting"
 				game.data = *NewStoryGame()
@@ -170,6 +174,8 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 
 	if game.state == "starting" {
 		switch game.data.mode {
+		case "development":
+			game.data = *NewDevelopmentGame()
 		case "evolved":
 			game.data = *NewEvolvedGame()
 		case "pacifism":

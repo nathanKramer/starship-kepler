@@ -51,10 +51,12 @@ type DrawContext struct {
 	gameOverTxt *text.Text
 	centeredTxt *text.Text
 	scoreTxt    *text.Text
+	consoleTxt  *text.Text
 	livesTxt    *text.Text
 }
 
 var basicFont *text.Atlas
+var smallFont *text.Atlas
 
 func NewDrawContext(cfg pixelgl.WindowConfig) *DrawContext {
 	drawContext := new(DrawContext)
@@ -108,6 +110,8 @@ func NewDrawContext(cfg pixelgl.WindowConfig) *DrawContext {
 		log.Fatal(err)
 	}
 	var normalFace font.Face = basicfont.Face7x13
+	var smallFace font.Face = basicfont.Face7x13
+
 	nFont, err := truetype.Parse(ttfData)
 	if err != nil {
 		log.Fatal(err)
@@ -116,12 +120,18 @@ func NewDrawContext(cfg pixelgl.WindowConfig) *DrawContext {
 			Size: 18.0,
 			DPI:  96,
 		})
+
+		smallFace = truetype.NewFace(nFont, &truetype.Options{
+			Size: 14.0,
+			DPI:  96,
+		})
 	}
 
 	drawContext.titleFont = text.NewAtlas(titleFace, text.ASCII)
 
 	// Todo, remove entities direct dependency of font so that this isn't global
 	basicFont = text.NewAtlas(normalFace, text.ASCII)
+	smallFont = text.NewAtlas(smallFace, text.ASCII)
 
 	drawContext.titleTxt = text.New(pixel.V(0, 128), drawContext.titleFont)
 	drawContext.gameOverTxt = text.New(pixel.V(0, 64), basicFont)
@@ -158,8 +168,7 @@ func (d *DrawContext) SetBounds(bounds pixel.Rect) {
 
 	d.scoreTxt = text.New(pixel.V(-(bounds.W()/2)+120, (bounds.H()/2)-50), basicFont)
 	d.livesTxt = text.New(pixel.V(0.0, (bounds.H()/2)-50), basicFont)
-	d.scoreTxt = text.New(pixel.V(-(bounds.W()/2)+120, (bounds.H()/2)-50), basicFont)
-	d.livesTxt = text.New(pixel.V(0.0, (bounds.H()/2)-50), basicFont)
+	d.consoleTxt = text.New(pixel.V(-(bounds.W()/2)+50, (bounds.H()/2)-170), smallFont)
 }
 
 func drawShip(d *imdraw.IMDraw) {
@@ -255,16 +264,16 @@ func drawMenu(d *DrawContext, menu *menu) {
 
 func drawDebug(d *DrawContext, game *game) {
 	txt := "Debugging: On"
-	fmt.Fprintln(d.scoreTxt, txt)
+	fmt.Fprintln(d.consoleTxt, txt)
 
 	txt = "Timescale: %.2f\n"
-	fmt.Fprintf(d.scoreTxt, txt, game.data.timescale)
+	fmt.Fprintf(d.consoleTxt, txt, game.data.timescale)
 
 	txt = "Entities: %d\n"
-	fmt.Fprintf(d.scoreTxt, txt, len(game.data.entities))
+	fmt.Fprintf(d.consoleTxt, txt, len(game.data.entities))
 
 	txt = "Entities Cap: %d\n"
-	fmt.Fprintf(d.scoreTxt, txt, cap(game.data.entities))
+	fmt.Fprintf(d.consoleTxt, txt, cap(game.data.entities))
 
 	bufferedSpawns := 0
 	for _, ent := range game.data.newEntities {
@@ -274,10 +283,10 @@ func drawDebug(d *DrawContext, game *game) {
 	}
 
 	// txt = "Buffered Living Entities: %d\n"
-	// fmt.Fprintf(d.scoreTxt, txt, bufferedSpawns)
+	// fmt.Fprintf(d.consoleTxt, txt, bufferedSpawns)
 
 	// txt = "Buffered Entities Cap: %d\n"
-	// fmt.Fprintf(d.scoreTxt, txt, cap(game.data.newEntities))
+	// fmt.Fprintf(d.consoleTxt, txt, cap(game.data.newEntities))
 
 	activeParticles := 0
 	for _, p := range game.data.particles {
@@ -287,9 +296,9 @@ func drawDebug(d *DrawContext, game *game) {
 	}
 
 	txt = "Particles: %d\n"
-	fmt.Fprintf(d.scoreTxt, txt, activeParticles)
+	fmt.Fprintf(d.consoleTxt, txt, activeParticles)
 	txt = "Particles Cap: %d\n"
-	fmt.Fprintf(d.scoreTxt, txt, cap(game.data.particles))
+	fmt.Fprintf(d.consoleTxt, txt, cap(game.data.particles))
 
 	bufferedParticles := 0
 	for _, particle := range game.data.newParticles {
@@ -299,30 +308,30 @@ func drawDebug(d *DrawContext, game *game) {
 	}
 
 	txt = "Buffered Particles: %d\n"
-	fmt.Fprintf(d.scoreTxt, txt, bufferedParticles)
+	fmt.Fprintf(d.consoleTxt, txt, bufferedParticles)
 
 	txt = "Bullets: %d\n"
-	fmt.Fprintf(d.scoreTxt, txt, len(game.data.bullets))
+	fmt.Fprintf(d.consoleTxt, txt, len(game.data.bullets))
 	txt = "Bullets Cap: %d\n"
-	fmt.Fprintf(d.scoreTxt, txt, cap(game.data.bullets))
+	fmt.Fprintf(d.consoleTxt, txt, cap(game.data.bullets))
 
 	txt = "Kills: %d\n"
-	fmt.Fprintf(d.scoreTxt, txt, game.data.kills)
+	fmt.Fprintf(d.consoleTxt, txt, game.data.kills)
 
 	txt = "Notoriety: %f\n"
-	fmt.Fprintf(d.scoreTxt, txt, game.data.notoriety)
+	fmt.Fprintf(d.consoleTxt, txt, game.data.notoriety)
 
 	txt = "spawnCount: %d\n"
-	fmt.Fprintf(d.scoreTxt, txt, game.data.spawnCount)
+	fmt.Fprintf(d.consoleTxt, txt, game.data.spawnCount)
 
 	txt = "spawnFreq: %f\n"
-	fmt.Fprintf(d.scoreTxt, txt, game.data.ambientSpawnFreq)
+	fmt.Fprintf(d.consoleTxt, txt, game.data.ambientSpawnFreq)
 
 	txt = "waveFreq: %f\n"
-	fmt.Fprintf(d.scoreTxt, txt, game.data.waveFreq)
+	fmt.Fprintf(d.consoleTxt, txt, game.data.waveFreq)
 
 	txt = "multiplierReward: %d kills required\n"
-	fmt.Fprintf(d.scoreTxt, txt, game.data.multiplierReward-game.data.killsSinceBorn)
+	fmt.Fprintf(d.consoleTxt, txt, game.data.multiplierReward-game.data.killsSinceBorn)
 	// }
 
 }
@@ -376,7 +385,7 @@ func DrawGame(win *pixelgl.Window, game *game, d *DrawContext) {
 			}
 		}
 
-		if game.data.mode == "evolved" || game.data.mode == "pacifism" || game.data.mode == "menu" {
+		if game.data.mode != "story" {
 			// Draw: grid effect
 			// TODO, extract?
 			// Add catmullrom splines?
@@ -825,8 +834,10 @@ func DrawGame(win *pixelgl.Window, game *game, d *DrawContext) {
 			d.scoreTxt.Dot.X -= (d.scoreTxt.BoundsOf(txt).W() / 2)
 			fmt.Fprintf(d.scoreTxt, txt, game.data.scoreMultiplier)
 
+			d.consoleTxt.Clear()
 			if g_debug {
 				drawDebug(d, game)
+				d.consoleTxt.Draw(win, pixel.IM.Scaled(d.consoleTxt.Orig, 1))
 			}
 
 			d.scoreTxt.Draw(

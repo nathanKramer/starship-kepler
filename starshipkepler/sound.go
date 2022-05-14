@@ -244,8 +244,10 @@ func PlaySong(songName string) {
 	speaker.Clear()
 	s, ok := musicStreamers[songName]
 	if !ok {
-		errorString := fmt.Sprintf("Unknown sound: %s", songName)
-		panic(errorString)
+		// errorString := fmt.Sprintf("Unknown sound: %s", songName)
+		// panic(errorString)
+		fmt.Printf("Unknown sound: %s", songName)
+		return
 	}
 
 	s.Seek(0)

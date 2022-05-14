@@ -114,6 +114,7 @@ type game struct {
 
 // Menus
 var implementedMenuItems = []string{
+	"Development",
 	"Quick Play: Evolved",
 	"Quick Play: Pacifism",
 	"Options",
@@ -131,6 +132,7 @@ func NewMainMenu() menu {
 	return menu{
 		selection: 1,
 		options: []string{
+			"Development",
 			"Story Mode",
 			"Quick Play: Evolved",
 			"Quick Play: Pacifism",
@@ -288,6 +290,21 @@ func NewEvolvedGame() *gamedata {
 	data.mode = "evolved"
 	data.weapon = *NewWeaponData()
 	data.lives = 3
+	data.multiplierReward = 25 // kills
+	data.lifeReward = 75000
+	data.bombReward = 100000
+	data.waveFreq = 5 // waves have a duration so can influence the pace of the game
+	data.weaponUpgradeFreq = 30
+	data.landingPartyFreq = 10 // more strategic one-off spawn systems
+	data.ambientSpawnFreq = 3  // ambient spawning can be toggled off temporarily, but is otherwise always going on
+	return data
+}
+
+func NewDevelopmentGame() *gamedata {
+	data := NewGameData()
+	data.mode = "development"
+	data.weapon = *NewWeaponData()
+	data.lives = 100
 	data.multiplierReward = 25 // kills
 	data.lifeReward = 75000
 	data.bombReward = 100000
