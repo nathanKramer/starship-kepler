@@ -130,7 +130,7 @@ var implementedMenuItems = []string{
 
 func NewMainMenu() menu {
 	return menu{
-		selection: 1,
+		selection: 0,
 		options: []string{
 			"Development",
 			"Story Mode",
