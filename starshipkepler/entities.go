@@ -299,6 +299,10 @@ func (e *entityData) IntersectWithPlayer(
 			game.data.entities[entID] = ent
 		}
 		e.alive = false
+	} else if e.entityType == "essence" {
+		e.alive = false
+		e.death = currTime
+		player.QueueElement(e.elements[0])
 	} else {
 		warded := false
 		for _, el := range e.elements {
@@ -733,6 +737,13 @@ func NewPlayer(x float64, y float64) *entityData {
 	p := NewEntity(0.0, 0.0, 44, 575, "player")
 	p.elements = make([]string, 0)
 	return p
+}
+
+func NewEssence(x float64, y float64, essence string, color color.Color) *entityData {
+	e := NewEntity(x, y, 44.0, 0, "essence")
+	e.elements = []string{essence}
+	e.color = color
+	return e
 }
 
 func NewFollower(x float64, y float64) *entityData {

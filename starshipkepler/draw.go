@@ -603,7 +603,38 @@ func DrawGame(win *pixelgl.Window, game *game, d *DrawContext) {
 						d.tmpTarget.Clear()
 						d.tmpTarget.SetMatrix(pixel.IM.Rotated(e.origin, e.orientation.Angle()))
 						weight := 3.0
-						if e.entityType == "follower" {
+
+						// essences
+						if e.entityType == "essence" {
+							rotInterp := 2 * math.Pi * math.Mod(game.totalTime, 8.0) / 8
+							currentT := math.Sin(rotInterp)
+							ang := (currentT * 2 * math.Pi) - math.Pi
+
+							d.tmpTarget.Clear()
+							d.tmpTarget.Color = e.color
+							baseTransform := pixel.IM.Rotated(pixel.ZV, ang).Moved(e.origin)
+							size = size / 2
+							d.tmpTarget.SetMatrix(baseTransform)
+							d.tmpTarget.Push(
+								pixel.V(0, size),
+								pixel.V(2, 1).Scaled(size/8),
+								pixel.V(0, size).Rotated(-120.0*math.Pi/180),
+								pixel.V(0, -2.236).Scaled(size/8),
+								pixel.V(0, size).Rotated(120.0*math.Pi/180),
+								pixel.V(-2, 1).Scaled(size/8),
+							)
+							d.tmpTarget.Polygon(3)
+							d.tmpTarget.Push(
+								pixel.V(0, size).Rotated(60.0*math.Pi/180),
+								pixel.V(2, 1).Scaled(size/8).Rotated(60.0*math.Pi/180),
+								pixel.V(0, size).Rotated(-120.0*math.Pi/180).Rotated(60.0*math.Pi/180),
+								pixel.V(0, -2.236).Scaled(size/8).Rotated(60.0*math.Pi/180),
+								pixel.V(0, size).Rotated(120.0*math.Pi/180).Rotated(60.0*math.Pi/180),
+								pixel.V(-2, 1).Scaled(size/8).Rotated(60.0*math.Pi/180),
+							)
+							d.tmpTarget.Polygon(2)
+							d.tmpTarget.Draw(d.imd)
+						} else if e.entityType == "follower" {
 							d.tmpTarget.Color = e.color
 
 							growth := size / 10.0

@@ -417,6 +417,10 @@ func (game *game) PlayGameMusic() {
 	}
 }
 
+func (game *game) developmentGameModeUpdate(debug bool, last time.Time, totalTime float64, player *entityData) {
+
+}
+
 func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime float64, player *entityData) {
 	updateMusic(game.data.mode)
 	// ambient spawns

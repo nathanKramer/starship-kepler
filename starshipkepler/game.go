@@ -278,28 +278,6 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 			player.target = pixel.Vec{}
 		}
 
-		if win.JustPressed(pixelgl.KeyQ) || win.JoystickJustPressed(ui.currJoystick, pixelgl.ButtonX) {
-			player.QueueElement("water")
-		}
-		if win.JustPressed(pixelgl.KeyE) || win.JoystickJustPressed(ui.currJoystick, pixelgl.ButtonRightBumper) {
-			player.QueueElement("chaos")
-		}
-		if win.JustPressed(pixelgl.KeyR) || win.JoystickJustPressed(ui.currJoystick, pixelgl.ButtonLeftBumper) {
-			player.QueueElement("spirit")
-		}
-		if win.JustPressed(pixelgl.KeyF) || win.JoystickJustPressed(ui.currJoystick, pixelgl.ButtonB) {
-			player.QueueElement("fire")
-		}
-		if win.JustPressed(pixelgl.KeyZ) || win.JoystickJustPressed(ui.currJoystick, pixelgl.ButtonA) {
-			player.QueueElement("lightning")
-		}
-		if win.JustPressed(pixelgl.KeyX) || win.JoystickJustPressed(ui.currJoystick, pixelgl.ButtonY) {
-			player.QueueElement("wind")
-		}
-		if win.JustPressed(pixelgl.KeyC) {
-			player.QueueElement("life")
-		}
-
 		if win.Pressed(uiActionStop) || player.origin.To(player.target).Len() < 50.0 {
 			player.target = pixel.Vec{}
 		}
@@ -324,6 +302,171 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 		}
 
 		// paste debug.go
+		// spawn entities
+		// This is a long procedure to allow spawning enemies for test purposes
+		if g_debug {
+			if win.JustPressed(pixelgl.KeyQ) {
+				essence := *NewEssence(
+					ui.MousePos.X,
+					ui.MousePos.Y,
+					"water",
+					elementWaterColor,
+				)
+				game.data.newEntities = append(game.data.newEntities, essence)
+			}
+
+			if win.JustPressed(pixelgl.KeyE) || win.JoystickJustPressed(ui.currJoystick, pixelgl.ButtonRightBumper) {
+				essence := *NewEssence(
+					ui.MousePos.X,
+					ui.MousePos.Y,
+					"chaos",
+					elementChaosColor,
+				)
+				game.data.newEntities = append(game.data.newEntities, essence)
+			}
+			if win.JustPressed(pixelgl.KeyR) || win.JoystickJustPressed(ui.currJoystick, pixelgl.ButtonLeftBumper) {
+				essence := *NewEssence(
+					ui.MousePos.X,
+					ui.MousePos.Y,
+					"spirit",
+					elementSpiritColor,
+				)
+				game.data.newEntities = append(game.data.newEntities, essence)
+			}
+			if win.JustPressed(pixelgl.KeyF) || win.JoystickJustPressed(ui.currJoystick, pixelgl.ButtonB) {
+				essence := *NewEssence(
+					ui.MousePos.X,
+					ui.MousePos.Y,
+					"fire",
+					elementFireColor,
+				)
+				game.data.newEntities = append(game.data.newEntities, essence)
+			}
+			if win.JustPressed(pixelgl.KeyZ) || win.JoystickJustPressed(ui.currJoystick, pixelgl.ButtonA) {
+				essence := *NewEssence(
+					ui.MousePos.X,
+					ui.MousePos.Y,
+					"lightning",
+					elementLightningColor,
+				)
+				game.data.newEntities = append(game.data.newEntities, essence)
+			}
+			if win.JustPressed(pixelgl.KeyX) || win.JoystickJustPressed(ui.currJoystick, pixelgl.ButtonY) {
+				essence := *NewEssence(
+					ui.MousePos.X,
+					ui.MousePos.Y,
+					"wind",
+					elementWindColor,
+				)
+				game.data.newEntities = append(game.data.newEntities, essence)
+			}
+			if win.JustPressed(pixelgl.KeyC) {
+				essence := *NewEssence(
+					ui.MousePos.X,
+					ui.MousePos.Y,
+					"life",
+					elementLifeColor,
+				)
+				game.data.newEntities = append(game.data.newEntities, essence)
+			}
+
+			if win.JustPressed(pixelgl.KeyG) {
+				enemy := *NewReplicator(
+					ui.MousePos.X,
+					ui.MousePos.Y,
+				)
+				game.data.newEntities = append(game.data.newEntities, enemy)
+			}
+			if win.JustPressed(pixelgl.KeyH) {
+				enemy := *NewSnek(
+					ui.MousePos.X,
+					ui.MousePos.Y,
+				)
+				game.data.newEntities = append(game.data.newEntities, enemy)
+			}
+			if win.JustPressed(pixelgl.KeyJ) {
+				enemy := *NewWanderer(
+					ui.MousePos.X,
+					ui.MousePos.Y,
+				)
+				game.data.newEntities = append(game.data.newEntities, enemy)
+			}
+			if win.JustPressed(pixelgl.KeyK) {
+				enemy := *NewFollower(
+					ui.MousePos.X,
+					ui.MousePos.Y,
+				)
+				game.data.newEntities = append(game.data.newEntities, enemy)
+			}
+			if win.JustPressed(pixelgl.KeyL) {
+				enemy := *NewDodger(
+					ui.MousePos.X,
+					ui.MousePos.Y,
+				)
+				game.data.newEntities = append(game.data.newEntities, enemy)
+			}
+			if win.JustPressed(pixelgl.KeySemicolon) {
+				enemy := *NewPinkSquare(
+					ui.MousePos.X,
+					ui.MousePos.Y,
+				)
+				game.data.newEntities = append(game.data.newEntities, enemy)
+			}
+			if win.JustPressed(pixelgl.KeyRightBracket) {
+				enemy := *NewSnek(
+					ui.MousePos.X,
+					ui.MousePos.Y,
+				)
+				game.data.newEntities = append(game.data.newEntities, enemy)
+			}
+			if win.JustPressed(pixelgl.KeyApostrophe) {
+				enemy := *NewBlackHole(
+					ui.MousePos.X,
+					ui.MousePos.Y,
+				)
+				game.data.newEntities = append(game.data.newEntities, enemy)
+			}
+
+			total := 16.0
+			step := 360.0 / total
+			if win.JustPressed(pixelgl.KeyN) {
+				for i := 0.0; i < total; i++ {
+					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+					enemy := *NewWanderer(spawnPos.X, spawnPos.Y)
+					game.data.newEntities = append(game.data.newEntities, enemy)
+				}
+			}
+			if win.JustPressed(pixelgl.KeyM) {
+				for i := 0.0; i < total; i++ {
+					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+					enemy := *NewFollower(spawnPos.X, spawnPos.Y)
+					game.data.newEntities = append(game.data.newEntities, enemy)
+				}
+			}
+			if win.JustPressed(pixelgl.KeyComma) {
+				for i := 0.0; i < total; i++ {
+					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+					enemy := *NewDodger(spawnPos.X, spawnPos.Y)
+					game.data.newEntities = append(game.data.newEntities, enemy)
+				}
+			}
+			if win.JustPressed(pixelgl.KeyPeriod) {
+				for i := 0.0; i < total; i++ {
+					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+					enemy := *NewPinkSquare(spawnPos.X, spawnPos.Y)
+					game.data.newEntities = append(game.data.newEntities, enemy)
+				}
+			}
+			if win.JustPressed(pixelgl.KeySlash) {
+				for i := 0.0; i < total; i++ {
+					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+					enemy := *NewBlackHole(spawnPos.X, spawnPos.Y)
+					game.data.newEntities = append(game.data.newEntities, enemy)
+				}
+			}
+
+		}
+
 	}
 
 	// main game update
@@ -1289,6 +1432,8 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 
 		if game.data.mode == "evolved" || game.data.mode == "menu" {
 			game.evolvedGameModeUpdate(g_debug, game.lastFrame, game.totalTime, player)
+		} else if game.data.mode == "development" {
+			game.developmentGameModeUpdate(g_debug, game.lastFrame, game.totalTime, player)
 		} else if game.data.mode == "pacifism" {
 			game.pacifismGameModeUpdate(g_debug, game.lastFrame, game.totalTime, player)
 		}
