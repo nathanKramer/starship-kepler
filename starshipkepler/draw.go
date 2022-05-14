@@ -558,15 +558,6 @@ func DrawGame(win *pixelgl.Window, game *game, d *DrawContext) {
 							pixel.V(-2, 1).Scaled(size/8),
 						)
 						d.tmpTarget.Polygon(3)
-						d.tmpTarget.Push(
-							pixel.V(0, size).Rotated(60.0*math.Pi/180),
-							pixel.V(2, 1).Scaled(size/8).Rotated(60.0*math.Pi/180),
-							pixel.V(0, size).Rotated(-120.0*math.Pi/180).Rotated(60.0*math.Pi/180),
-							pixel.V(0, -2.236).Scaled(size/8).Rotated(60.0*math.Pi/180),
-							pixel.V(0, size).Rotated(120.0*math.Pi/180).Rotated(60.0*math.Pi/180),
-							pixel.V(-2, 1).Scaled(size/8).Rotated(60.0*math.Pi/180),
-						)
-						d.tmpTarget.Polygon(3)
 						d.tmpTarget.Draw(d.imd)
 					} else if e.entityType == "blackhole" {
 						d.imd.Color = pixel.ToRGBA(e.color)

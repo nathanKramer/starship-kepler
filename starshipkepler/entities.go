@@ -408,6 +408,10 @@ func (e *entityData) DealDamage(
 	player *entityData,
 ) {
 
+	if e.entityType == "essence" {
+		return
+	}
+
 	for _, el := range e.elements {
 		for i, inflictorEl := range inflictor.elements {
 			if el == inflictorEl {
@@ -450,6 +454,18 @@ func (e *entityData) DealDamage(
 				game.data.newParticles = InlineAppendParticles(game.data.newParticles, p)
 			} else {
 				game.data.newParticles[len(game.data.newParticles)%maxParticles] = p
+			}
+		}
+
+		if len(e.elements) > 0 {
+			r := rand.Float64()
+			if r < 0.1 {
+				essence := *NewEssence(
+					e.origin.X, e.origin.Y, e.elements[0], e.color,
+				)
+				game.data.newEntities = InlineAppendEntities(
+					game.data.newEntities, essence,
+				)
 			}
 		}
 
