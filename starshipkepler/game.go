@@ -104,7 +104,6 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 
 			case "Fullscreen (1080p)":
 				win.SetMonitor(pixelgl.PrimaryMonitor())
-				win.SetBounds(pixel.R(0, 0, 1920, 1080))
 
 			case "Windowed (1024x768)":
 				win.SetMonitor(nil)

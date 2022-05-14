@@ -54,13 +54,6 @@ func run() {
 		cfg.Monitor = monitor
 	}
 
-	debug := true
-	if debug {
-		cfg.Bounds = pixel.R(0, 0, 1024, 768)
-		cfg.Maximized = false
-		cfg.Monitor = nil
-	}
-
 	win, err := pixelgl.NewWindow(cfg)
 	if err != nil {
 		panic(err)
@@ -81,12 +74,12 @@ func run() {
 		uiContext.MousePos = pixel.V(scaledX, scaledY).Add(game.CamPos)
 
 		starshipkepler.UpdateGame(win, game, uiContext)
-		if win.Bounds().W() != draw.PrimaryCanvas.Bounds().W() {
+		if win.Bounds().W() > 0 && win.Bounds().W() != draw.PrimaryCanvas.Bounds().W() {
 			// Resolution changed, tell the draw context
 			draw.SetBounds(win.Bounds())
 		}
-		starshipkepler.DrawGame(win, game, draw)
 
+		starshipkepler.DrawGame(win, game, draw)
 		win.Update()
 	}
 }
