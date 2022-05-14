@@ -23,9 +23,9 @@ type configuration struct {
 
 // Pull this stuff out into a config file.
 var config = configuration{
-	1920.0,
-	1080.0,
-	true,
+	1024.0,
+	768.0,
+	false,
 }
 
 func init() {
