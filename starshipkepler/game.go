@@ -1213,7 +1213,9 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 		for entID, existing := range game.data.entities {
 			died := (!existing.alive && existing.born != time.Time{})
 			expired := (existing.expiry != time.Time{}) && game.lastFrame.After(existing.expiry)
-			if died || expired {
+			diedWithNoExpiry := died && existing.expiry == (time.Time{})
+			diedAndExpired := died && expired
+			if diedWithNoExpiry || diedAndExpired {
 				game.data.entities[entID] = entityData{}
 				killedEnt++
 			} // kill entities
