@@ -114,9 +114,9 @@ type game struct {
 
 // Menus
 var implementedMenuItems = []string{
-	"Development",
+	// "Development",
 	"Quick Play: Evolved",
-	"Quick Play: Pacifism",
+	"Quick Play: Pacifism (pre-alpha)",
 	"Options",
 	"Quit",
 	"Resume",
@@ -130,12 +130,12 @@ var implementedMenuItems = []string{
 
 func NewMainMenu() menu {
 	return menu{
-		selection: 0,
+		selection: 1,
 		options: []string{
-			"Development",
+			// "Development",
 			"Story Mode",
 			"Quick Play: Evolved",
-			"Quick Play: Pacifism",
+			"Quick Play: Pacifism (pre-alpha)",
 			"Leaderboard",
 			"Achievements",
 			"Options",

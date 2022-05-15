@@ -95,7 +95,7 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 				game.state = "starting"
 				game.data = *NewEvolvedGame()
 
-			case "Quick Play: Pacifism":
+			case "Quick Play: Pacifism (pre-alpha)":
 				game.state = "starting"
 				game.data = *NewPacifismGame()
 
