@@ -455,7 +455,7 @@ func (e *entityData) DealDamage(
 			r := rand.Float64()
 			if r < 0.1 {
 				essence := *NewEssence(
-					e.origin.X, e.origin.Y, e.elements[0], e.color,
+					e.origin.X, e.origin.Y, e.elements[0], e.color, game.lastFrame.Add(time.Duration(5)*time.Second),
 				)
 				game.data.newEntities = InlineAppendEntities(
 					game.data.newEntities, essence,
@@ -745,12 +745,14 @@ func NewEntity(x float64, y float64, size float64, speed float64, entityType str
 
 func NewPlayer(x float64, y float64) *entityData {
 	p := NewEntity(0.0, 0.0, 44, 575, "player")
+	// p.wards = make([]ward, 0)
 	p.elements = make([]string, 0)
 	return p
 }
 
-func NewEssence(x float64, y float64, essence string, color color.Color) *entityData {
+func NewEssence(x float64, y float64, essence string, color color.Color, expiry time.Time) *entityData {
 	e := NewEntity(x, y, 44.0, 0, "essence")
+	e.expiry = expiry
 	e.elements = []string{essence}
 	e.color = color
 	return e
@@ -832,9 +834,10 @@ func NewSnek(x float64, y float64) *entityData {
 func NewAngryBubble(x float64, y float64) *entityData {
 	w := NewEntity(x, y, 35.0, 200, "bubble")
 	// w.spawnSound = spawnBuffer4
-	w.elements = []string{"water"}
+	w.elements = []string{"spirit"}
 	w.spawnTime = 0.0
 	w.spawning = false
+	w.color = elementSpiritColor
 	w.acceleration = 0.9
 	w.speed = 600
 	w.friction = 0.99

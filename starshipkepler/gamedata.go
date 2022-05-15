@@ -477,7 +477,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 
 	livingEntities := 0
 	for _, e := range game.data.entities {
-		if e.alive {
+		if e.alive && e.entityType != "essence" {
 			livingEntities++
 		}
 	}
@@ -527,7 +527,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 				count := 2 + rand.Intn(4)
 				for i := 0; i < count; i++ {
 					p := corners[i%4]
-					enemy := NewDodger(
+					enemy := NewFollower(
 						p.X,
 						p.Y,
 					)
@@ -544,6 +544,16 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 					spawns = append(spawns, *enemy)
 				}
 			} else if r <= 0.35 {
+				count := 2 + rand.Intn(4)
+				for i := 0; i < count; i++ {
+					p := corners[i%4]
+					enemy := NewDodger(
+						p.X,
+						p.Y,
+					)
+					spawns = append(spawns, *enemy)
+				}
+			} else if r <= 0.45 {
 				count := 8 + rand.Intn(4)
 				for i := 0; i < count; i++ {
 					p := corners[i%4]

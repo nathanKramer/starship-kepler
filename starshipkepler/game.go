@@ -309,12 +309,14 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 		// spawn entities
 		// This is a long procedure to allow spawning enemies for test purposes
 		if g_debug {
+			expiry := game.lastFrame.Add(time.Duration(10) * time.Second)
 			if win.JustPressed(pixelgl.KeyQ) {
 				essence := *NewEssence(
 					ui.MousePos.X,
 					ui.MousePos.Y,
 					"water",
 					elementWaterColor,
+					expiry,
 				)
 				game.data.newEntities = append(game.data.newEntities, essence)
 			}
@@ -325,6 +327,7 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 					ui.MousePos.Y,
 					"chaos",
 					elementChaosColor,
+					expiry,
 				)
 				game.data.newEntities = append(game.data.newEntities, essence)
 			}
@@ -334,6 +337,7 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 					ui.MousePos.Y,
 					"spirit",
 					elementSpiritColor,
+					expiry,
 				)
 				game.data.newEntities = append(game.data.newEntities, essence)
 			}
@@ -343,6 +347,7 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 					ui.MousePos.Y,
 					"fire",
 					elementFireColor,
+					expiry,
 				)
 				game.data.newEntities = append(game.data.newEntities, essence)
 			}
@@ -352,6 +357,7 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 					ui.MousePos.Y,
 					"lightning",
 					elementLightningColor,
+					expiry,
 				)
 				game.data.newEntities = append(game.data.newEntities, essence)
 			}
@@ -361,6 +367,7 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 					ui.MousePos.Y,
 					"wind",
 					elementWindColor,
+					expiry,
 				)
 				game.data.newEntities = append(game.data.newEntities, essence)
 			}
@@ -370,6 +377,7 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 					ui.MousePos.Y,
 					"life",
 					elementLifeColor,
+					expiry,
 				)
 				game.data.newEntities = append(game.data.newEntities, essence)
 			}
@@ -1366,8 +1374,7 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 			died := (!existing.alive && existing.born != time.Time{})
 			expired := (existing.expiry != time.Time{}) && game.lastFrame.After(existing.expiry)
 			diedWithNoExpiry := died && existing.expiry == (time.Time{})
-			diedAndExpired := died && expired
-			if diedWithNoExpiry || diedAndExpired {
+			if diedWithNoExpiry || expired {
 				game.data.entities[entID] = entityData{}
 				killedEnt++
 			} // kill entities
