@@ -743,27 +743,29 @@ func DrawGame(win *pixelgl.Window, game *game, d *DrawContext) {
 		d.innerWardBatch.Clear()
 		d.outerWardBatch.Clear()
 
-		rotInterp := 2 * math.Pi * math.Mod(game.totalTime, 8.0) / 8
-		currentT := math.Sin(rotInterp)
-		ang := (currentT * 2 * math.Pi) - math.Pi
+		if game.data.player.alive {
+			rotInterp := 2 * math.Pi * math.Mod(game.totalTime, 8.0) / 8
+			currentT := math.Sin(rotInterp)
+			ang := (currentT * 2 * math.Pi) - math.Pi
 
-		d.PrimaryCanvas.SetComposeMethod(pixel.ComposePlus)
-		if len(game.data.player.elements) > 0 {
-			d.innerWardBatch.Clear()
-			d.innerWardBatch.SetMatrix(pixel.IM.Rotated(pixel.ZV, ang).Moved(game.data.player.origin))
-			el := game.data.player.elements[0]
-			d.innerWardBatch.SetColorMask(elements[el])
-			d.wardInner.Draw(d.innerWardBatch, pixel.IM.Scaled(pixel.ZV, 0.6))
-			d.innerWardBatch.Draw(d.PrimaryCanvas)
-		}
+			d.PrimaryCanvas.SetComposeMethod(pixel.ComposePlus)
+			if len(game.data.player.elements) > 0 {
+				d.innerWardBatch.Clear()
+				d.innerWardBatch.SetMatrix(pixel.IM.Rotated(pixel.ZV, ang).Moved(game.data.player.origin))
+				el := game.data.player.elements[0]
+				d.innerWardBatch.SetColorMask(elements[el])
+				d.wardInner.Draw(d.innerWardBatch, pixel.IM.Scaled(pixel.ZV, 0.6))
+				d.innerWardBatch.Draw(d.PrimaryCanvas)
+			}
 
-		if len(game.data.player.elements) > 1 {
-			d.outerWardBatch.Clear()
-			el := game.data.player.elements[1]
-			d.outerWardBatch.SetMatrix(pixel.IM.Rotated(pixel.ZV, ang).Moved(game.data.player.origin))
-			d.outerWardBatch.SetColorMask(elements[el])
-			d.wardOuter.Draw(d.outerWardBatch, pixel.IM.Scaled(pixel.ZV, 0.6))
-			d.outerWardBatch.Draw(d.PrimaryCanvas)
+			if len(game.data.player.elements) > 1 {
+				d.outerWardBatch.Clear()
+				el := game.data.player.elements[1]
+				d.outerWardBatch.SetMatrix(pixel.IM.Rotated(pixel.ZV, ang).Moved(game.data.player.origin))
+				d.outerWardBatch.SetColorMask(elements[el])
+				d.wardOuter.Draw(d.outerWardBatch, pixel.IM.Scaled(pixel.ZV, 0.6))
+				d.outerWardBatch.Draw(d.PrimaryCanvas)
+			}
 		}
 
 		// if len(game.data.player.elements) > 2 {
