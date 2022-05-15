@@ -794,7 +794,7 @@ func DrawGame(win *pixelgl.Window, game *game, d *DrawContext) {
 		d.imd.Clear()
 		if game.state == "playing" {
 			for eID, e := range game.data.entities {
-				if (!e.alive && e.death != time.Time{} && e.entityType != "") {
+				if (!e.alive && e.death != time.Time{} && e.entityType != "" && e.bounty > 0) {
 					// fmt.Print("[DrawBounty]")
 					// Draw: bounty
 					e.text.Clear()
