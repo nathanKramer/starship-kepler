@@ -543,7 +543,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 					)
 					spawns = append(spawns, *enemy)
 				}
-			} else if r <= 0.35 {
+			} else if r <= 0.4 {
 				count := 2 + rand.Intn(4)
 				for i := 0; i < count; i++ {
 					p := corners[i%4]

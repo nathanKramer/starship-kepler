@@ -561,7 +561,7 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 		timeSinceBullet := game.lastFrame.Sub(game.data.lastBullet).Milliseconds()
 		timeSinceAbleToShoot := timeSinceBullet - int64(float64(game.data.weapon.fireRate)/game.timescale())
 
-		if game.data.weapon != (weapondata{}) && timeSinceAbleToShoot >= 0 {
+		if game.data.weapon != (weapondata{}) && timeSinceAbleToShoot >= 0 && game.data.player.alive {
 			if game.data.mode == "menu" {
 				closest := 100000.0
 				closestEntity := pixel.Vec{}
@@ -1251,15 +1251,15 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 				game.data.weapon.conicAngle = 0
 			}
 
-			if win.JustPressed(uiActionAct) {
-				// possible ways this could work:
-				// ward elements could have passive effects, OR not.
-				// I'm toying around with passive effects, and activation effects (which destroy the ward, thus removing the passive effects)
-				// two kinds of activations: internal (probably defensive) and external (probably offensive)
-				//end
-				game.data.weapon = *NewWeaponData()
-				player.elements = make([]string, 0)
-			}
+			// if win.JustPressed(uiActionAct) {
+			// 	// possible ways this could work:
+			// 	// ward elements could have passive effects, OR not.
+			// 	// I'm toying around with passive effects, and activation effects (which destroy the ward, thus removing the passive effects)
+			// 	// two kinds of activations: internal (probably defensive) and external (probably offensive)
+			// 	//end
+			// 	game.data.weapon = *NewWeaponData()
+			// 	player.elements = make([]string, 2)
+			// }
 		}
 
 		// check for bomb here for now
