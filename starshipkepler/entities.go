@@ -321,6 +321,8 @@ func (e *entityData) IntersectWithPlayer(
 			e.killedPlayer = true
 			player.alive = false
 			player.death = currTime
+			game.data.lastWave = time.Now().Add((time.Duration(-game.data.waveFreq) + 2) * time.Second)
+			game.data.spawning = false
 			PlaySound("player/die")
 
 			for i := 0; i < 1200; i++ {
@@ -341,29 +343,21 @@ func (e *entityData) IntersectWithPlayer(
 				)
 				game.data.newParticles = InlineAppendParticles(game.data.newParticles, p)
 			}
+
+			e.alive = false
+			for entID, ent := range game.data.entities {
+				ent.alive = false
+				game.data.entities[entID] = ent
+			}
+
 			if game.data.mode == "menu" {
 				game.data.player = *NewPlayer(0.0, 0.0)
-				for entID, ent := range game.data.entities {
-					if !ent.alive {
-						continue
-					}
-					ent.alive = false
-					game.data.entities[entID] = ent
-				}
 			} else {
 				game.data.lives--
 				if game.data.lives == 0 {
 					game.state = "game_over"
 
 					PlaySound("game/over")
-
-					for entID, ent := range game.data.entities {
-						if !ent.alive {
-							continue
-						}
-						ent.alive = false
-						game.data.entities[entID] = ent
-					}
 					game.data.spawning = false
 
 				}

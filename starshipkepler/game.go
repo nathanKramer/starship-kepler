@@ -210,8 +210,10 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 		}
 	} else if game.state == "playing" {
 		if !player.alive {
-			game.respawnPlayer()
-			game.grid.ApplyDirectedForce(Vector3{0.0, 0.0, 1400.0}, Vector3{player.origin.X, player.origin.Y, 0.0}, 80)
+			if game.lastFrame.Sub(player.death).Seconds() > 1.0 {
+				game.respawnPlayer()
+				game.grid.ApplyDirectedForce(Vector3{0.0, 0.0, 1400.0}, Vector3{player.origin.X, player.origin.Y, 0.0}, 80)
+			}
 		}
 
 		if uiPause(win, ui.currJoystick) {
@@ -225,80 +227,82 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 		}
 
 		// player controls
-		if win.JustPressed(pixelgl.KeyMinus) {
-			game.globalTimeScale *= 0.5
-			if game.globalTimeScale < 0.1 {
-				game.globalTimeScale = 0.0
+		if player.alive {
+			if win.JustPressed(pixelgl.KeyMinus) {
+				game.globalTimeScale *= 0.5
+				if game.globalTimeScale < 0.1 {
+					game.globalTimeScale = 0.0
+				}
 			}
-		}
-		if win.JustPressed(pixelgl.KeyEqual) {
-			game.globalTimeScale *= 2.0
-			if game.globalTimeScale > 4.0 || game.globalTimeScale == 0.0 {
-				game.globalTimeScale = 1.0
+			if win.JustPressed(pixelgl.KeyEqual) {
+				game.globalTimeScale *= 2.0
+				if game.globalTimeScale > 4.0 || game.globalTimeScale == 0.0 {
+					game.globalTimeScale = 1.0
+				}
 			}
-		}
-		if win.JustPressed(pixelgl.Key1) {
-			game.data.weapon = *NewWeaponData()
-		}
-		if win.JustPressed(pixelgl.Key2) {
-			game.data.weapon = *NewBurstWeapon()
-		}
-		if win.JustPressed(pixelgl.Key3) {
-			game.data.weapon = *NewConicWeapon()
-		}
+			if win.JustPressed(pixelgl.Key1) {
+				game.data.weapon = *NewWeaponData()
+			}
+			if win.JustPressed(pixelgl.Key2) {
+				game.data.weapon = *NewBurstWeapon()
+			}
+			if win.JustPressed(pixelgl.Key3) {
+				game.data.weapon = *NewConicWeapon()
+			}
 
-		// player.velocity = pixel.ZV
-		// if win.Pressed(uiActionAct) {
-		// mouse based target movement
-		// 	player.target = mp
-		// }
+			// player.velocity = pixel.ZV
+			// if win.Pressed(uiActionAct) {
+			// mouse based target movement
+			// 	player.target = mp
+			// }
 
-		// if win.Pressed(uiActionSwitchMode) {
-		// 	// GW
-		// 	player.mode = "GW"
-		// 	player.elements = make([]string, 0)
-		// } else {
-		// 	player.mode = "MWW"
-		// }
+			// if win.Pressed(uiActionSwitchMode) {
+			// 	// GW
+			// 	player.mode = "GW"
+			// 	player.elements = make([]string, 0)
+			// } else {
+			// 	player.mode = "MWW"
+			// }
 
-		if win.Pressed(pixelgl.KeyLeft) || win.Pressed(pixelgl.KeyA) {
-			direction = direction.Add(pixel.V(-1, 0))
-			player.target = pixel.Vec{}
-		}
-		if win.Pressed(pixelgl.KeyUp) || win.Pressed(pixelgl.KeyW) {
-			direction = direction.Add(pixel.V(0, 1))
-			player.target = pixel.Vec{}
-		}
-		if win.Pressed(pixelgl.KeyRight) || win.Pressed(pixelgl.KeyD) {
-			direction = direction.Add(pixel.V(1, 0))
-			player.target = pixel.Vec{}
-		}
-		if win.Pressed(pixelgl.KeyDown) || win.Pressed(pixelgl.KeyS) {
-			direction = direction.Add(pixel.V(0, -1))
-			player.target = pixel.Vec{}
-		}
+			if win.Pressed(pixelgl.KeyLeft) || win.Pressed(pixelgl.KeyA) {
+				direction = direction.Add(pixel.V(-1, 0))
+				player.target = pixel.Vec{}
+			}
+			if win.Pressed(pixelgl.KeyUp) || win.Pressed(pixelgl.KeyW) {
+				direction = direction.Add(pixel.V(0, 1))
+				player.target = pixel.Vec{}
+			}
+			if win.Pressed(pixelgl.KeyRight) || win.Pressed(pixelgl.KeyD) {
+				direction = direction.Add(pixel.V(1, 0))
+				player.target = pixel.Vec{}
+			}
+			if win.Pressed(pixelgl.KeyDown) || win.Pressed(pixelgl.KeyS) {
+				direction = direction.Add(pixel.V(0, -1))
+				player.target = pixel.Vec{}
+			}
 
-		if win.Pressed(uiActionStop) || player.origin.To(player.target).Len() < 50.0 {
-			player.target = pixel.Vec{}
-		}
+			if win.Pressed(uiActionStop) || player.origin.To(player.target).Len() < 50.0 {
+				player.target = pixel.Vec{}
+			}
 
-		if (player.target != pixel.Vec{}) {
-			direction = direction.Add(player.origin.To(player.target).Unit())
-			midColor := HSVToColor(3.0, 0.7, 1.0)
-			game.data.newParticles = InlineAppendParticles(
-				game.data.newParticles,
-				NewParticle(player.target.X, player.target.Y, midColor, 32.0, pixel.V(0.5, 1.0), 0.0, randomVector(1), 1.0, "ship"),
-			)
-		}
+			if (player.target != pixel.Vec{}) {
+				direction = direction.Add(player.origin.To(player.target).Unit())
+				midColor := HSVToColor(3.0, 0.7, 1.0)
+				game.data.newParticles = InlineAppendParticles(
+					game.data.newParticles,
+					NewParticle(player.target.X, player.target.Y, midColor, 32.0, pixel.V(0.5, 1.0), 0.0, randomVector(1), 1.0, "ship"),
+				)
+			}
 
-		if win.JoystickPresent(ui.currJoystick) {
-			moveVec := uiThumbstickVector(
-				win,
-				ui.currJoystick,
-				pixelgl.AxisLeftX,
-				pixelgl.AxisLeftY,
-			)
-			direction = direction.Add(moveVec)
+			if win.JoystickPresent(ui.currJoystick) {
+				moveVec := uiThumbstickVector(
+					win,
+					ui.currJoystick,
+					pixelgl.AxisLeftX,
+					pixelgl.AxisLeftY,
+				)
+				direction = direction.Add(moveVec)
+			}
 		}
 
 		// paste debug.go
