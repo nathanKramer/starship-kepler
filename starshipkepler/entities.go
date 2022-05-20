@@ -355,11 +355,7 @@ func (e *entityData) IntersectWithPlayer(
 			} else {
 				game.data.lives--
 				if game.data.lives == 0 {
-					game.state = "game_over"
-
-					PlaySound("game/over")
-					game.data.spawning = false
-
+					GameOver(game)
 				}
 			}
 		}

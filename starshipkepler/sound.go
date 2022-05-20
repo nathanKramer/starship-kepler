@@ -149,7 +149,7 @@ func initSounds() {
 	shotBuffer, shotSoundFormat = prepareBuffer("sound/shoot.mp3")
 	soundEffects["sound/shoot.mp3"] = &soundEffect{
 		buffer: shotBuffer,
-		volume: -0.9,
+		volume: -1.1,
 	}
 
 	shotBuffer2, shotSoundFormat = prepareBuffer("sound/shoot2.mp3")
@@ -168,7 +168,7 @@ func initSounds() {
 	shotBuffer4, shotSoundFormat = prepareBuffer("sound/shoot4.mp3")
 	soundEffects["sound/shoot-mixed.mp3"] = &soundEffect{
 		buffer: shotBuffer4,
-		volume: -0.9,
+		volume: -1.1,
 	}
 
 	spawnBuffer, _ = prepareBuffer("sound/menu-step.wav")

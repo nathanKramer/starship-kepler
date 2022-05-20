@@ -18,6 +18,18 @@ func (game *game) timescale() float64 {
 	return game.globalTimeScale * game.data.timescale
 }
 
+func GameOver(game *game) {
+	PlaySound("game/over")
+	game.state = "game_over"
+	game.data.spawning = false
+
+	if game.data.score > game.persistentData.Highscore {
+		game.persistentData.Highscore = game.data.score
+	}
+
+	WritePersistentData(game.persistentData)
+}
+
 func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 
 	if game.lastFrame.Sub(game.lastMemCheck).Seconds() > 5.0 {
