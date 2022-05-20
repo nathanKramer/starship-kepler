@@ -136,6 +136,7 @@ func NewDrawContext(cfg pixelgl.WindowConfig) *DrawContext {
 	drawContext.titleTxt = text.New(pixel.V(0, 128), drawContext.titleFont)
 	drawContext.gameOverTxt = text.New(pixel.V(0, 64), basicFont)
 	drawContext.centeredTxt = text.New(pixel.V(0, 0), basicFont)
+	drawContext.centeredTxt.LineHeight = basicFont.LineHeight() * 1.5
 
 	drawContext.SetBounds(cfg.Bounds)
 	return drawContext
@@ -252,7 +253,7 @@ func drawMenu(d *DrawContext, menu *menu) {
 				d.centeredTxt.Dot.Add(
 					pixel.V(
 						-8.0,
-						(d.centeredTxt.LineHeight/2.0)-4.0,
+						(d.centeredTxt.LineHeight/2.0)-10,
 					),
 				),
 			)
