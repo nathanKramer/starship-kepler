@@ -1034,6 +1034,14 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 			}
 		}
 
+		for _, e := range game.data.entities {
+			if e.entityType != "essence" || !e.alive {
+				continue
+			}
+
+			game.grid.ApplyImplosiveForce(3.0, Vector3{e.origin.X, e.origin.Y, 0.0}, 50+e.radius)
+		}
+
 		game.grid.Update()
 
 		// Apply velocities
@@ -1093,10 +1101,11 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 			if b.data.alive && (b.data.expiry == time.Time{} || b.data.expiry.After(game.lastFrame)) {
 				for eID, e := range game.data.entities {
 					if e.alive && !e.spawning && b.data.Circle().Intersect(e.Circle()).Radius > 0 && e.entityType != "essence" {
+						bulletHp := b.data.hp
 						b.DealDamage(
 							&e,
 							bID,
-							1,
+							e.hp,
 							game.lastFrame,
 							game,
 							player,
@@ -1115,7 +1124,7 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 						e.DealDamage(
 							&b.data,
 							eID,
-							1,
+							bulletHp,
 							game.lastFrame,
 							game,
 							player,
