@@ -664,7 +664,7 @@ func DrawGame(win *pixelgl.Window, game *game, d *DrawContext) {
 							d.tmpTarget.Line(weight)
 						} else if e.entityType == "bubble" {
 							weight = 2.0
-							d.tmpTarget.Color = pixel.ToRGBA(color.RGBA{66, 135, 245, 192})
+							d.tmpTarget.Color = e.color
 							d.tmpTarget.Push(e.origin)
 							d.tmpTarget.Circle(e.radius, weight)
 						} else if e.entityType == "dodger" {
