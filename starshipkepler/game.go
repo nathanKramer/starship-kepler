@@ -623,6 +623,7 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 								pixel.V(math.Cos(ang), math.Sin(ang)),
 								append([]string{}, player.elements...),
 								d,
+								game.data.weapon.hp,
 							),
 						)
 					}
@@ -658,6 +659,7 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 									reflectiveAngleVec,
 									append([]string{}, player.elements...),
 									game.data.weapon.duration,
+									game.data.weapon.hp,
 								),
 							)
 						}
@@ -1238,10 +1240,11 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 					game.data.weapon.velocity = game.data.weapon.velocity + 400
 					game.data.weapon.bulletLength = game.data.weapon.bulletLength + 4
 					game.data.weapon.conicAngle = game.data.weapon.conicAngle + 1
+					game.data.weapon.hp = game.data.weapon.hp * 2 // make the bullets suuuuuuper tanky
 
 					// takes precedence over fire
 					game.data.weapon.duration = 5.0
-					game.data.weapon.fireRate = int64(math.Max(float64(144), float64(game.data.weapon.fireRate-30)))
+					game.data.weapon.fireRate = int64(math.Max(float64(120), float64(game.data.weapon.fireRate-30)))
 					if game.data.weapon.randomCone > 0 {
 						game.data.weapon.randomCone = 0
 						game.data.weapon.bulletCount = 2

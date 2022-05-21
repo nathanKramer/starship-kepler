@@ -868,10 +868,11 @@ func NewGate(x float64, y float64) *entityData {
 	return b
 }
 
-func NewBullet(x float64, y float64, width float64, length float64, speed float64, target pixel.Vec, elements []string, duration float64) *bullet {
+func NewBullet(x float64, y float64, width float64, length float64, speed float64, target pixel.Vec, elements []string, duration float64, hp int) *bullet {
 	b := new(bullet)
 	b.duration = duration
 	b.data = *NewEntity(x, y, width, speed, "bullet")
+	b.data.hp = hp
 	b.width = width
 	b.length = length
 	b.data.target = target

@@ -35,6 +35,7 @@ type weapondata struct {
 	velocity    float64
 	reflective  int
 	duration    float64
+	hp          int
 
 	bulletWidth  float64
 	bulletLength float64
@@ -189,6 +190,7 @@ func NewWeaponData() *weapondata {
 	weaponData.conicAngle = 0
 	weaponData.randomCone = 0
 	weaponData.duration = 5.0
+	weaponData.hp = 1
 
 	return weaponData
 }
@@ -383,6 +385,7 @@ func FireBullet(aim pixel.Vec, game *game, origin pixel.Vec, player *entityData)
 			aim.Unit().Rotated(increment),
 			append([]string{}, player.elements...),
 			game.data.weapon.duration,
+			game.data.weapon.hp,
 		)
 		game.data.newBullets = InlineAppendBullets(game.data.newBullets, *b)
 	}
