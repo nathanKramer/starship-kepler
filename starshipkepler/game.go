@@ -1291,45 +1291,51 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 		bombPressed := win.Pressed(pixelgl.KeySpace) || win.JoystickAxis(ui.currJoystick, pixelgl.AxisRightTrigger) > 0.1
 		// game.data.bombs > 0 &&
 		// droppping bomb concept for the moment
-		if len(player.elements) > 0 && bombPressed && game.lastFrame.Sub(game.data.lastBomb).Seconds() > 3.0 {
-			game.grid.ApplyExplosiveForce(256.0, Vector3{player.origin.X, player.origin.Y, 0.0}, 256.0)
-			sound := bombBuffer.Streamer(0, bombBuffer.Len())
-			volume := &effects.Volume{
-				Streamer: sound,
-				Base:     10,
-				Volume:   0.7,
-				Silent:   false,
+		if bombPressed && game.lastFrame.Sub(game.data.lastBomb).Seconds() > 2.0 {
+			if len(player.elements) > 0 {
+				game.grid.ApplyExplosiveForce(256.0, Vector3{player.origin.X, player.origin.Y, 0.0}, 256.0)
+				sound := bombBuffer.Streamer(0, bombBuffer.Len())
+				volume := &effects.Volume{
+					Streamer: sound,
+					Base:     10,
+					Volume:   0.7,
+					Silent:   false,
+				}
+				speaker.Play(volume)
+
+				for i := 0; i < 1000; i++ {
+					speed := 48.0 * (1.0 - 1/((rand.Float64()*32.0)+1))
+					col := int(rand.Float32() * float32(len(player.elements)))
+					p := NewParticle(
+						player.origin.X,
+						player.origin.Y,
+						pixel.ToRGBA(elements[player.elements[col]]),
+						100,
+						pixel.V(1.5, 1.5),
+						0.0,
+						randomVector(speed),
+						2.0,
+						"player",
+					)
+					game.data.newParticles = InlineAppendParticles(game.data.newParticles, p)
+				}
+
+				game.data.lastBomb = time.Now()
+
+				game.data.bombs--
+				for eID, e := range game.data.entities {
+					e.alive = false
+					e.death = game.lastFrame
+					e.expiry = game.lastFrame
+					game.data.entities[eID] = e
+				}
+
+				player.elements = make([]string, 0)
+				game.data.weapon = *NewWeaponData()
+			} else {
+				game.data.lastBomb = time.Now()
+				PlaySound("bomb/empty")
 			}
-			speaker.Play(volume)
-
-			for i := 0; i < 1000; i++ {
-				speed := 48.0 * (1.0 - 1/((rand.Float64()*32.0)+1))
-				col := int(rand.Float32() * float32(len(player.elements)))
-				p := NewParticle(
-					player.origin.X,
-					player.origin.Y,
-					pixel.ToRGBA(elements[player.elements[col]]),
-					100,
-					pixel.V(1.5, 1.5),
-					0.0,
-					randomVector(speed),
-					2.0,
-					"player",
-				)
-				game.data.newParticles = InlineAppendParticles(game.data.newParticles, p)
-			}
-
-			game.data.lastBomb = time.Now()
-
-			game.data.bombs--
-			for eID, e := range game.data.entities {
-				e.alive = false
-				e.death = game.lastFrame
-				e.expiry = game.lastFrame
-				game.data.entities[eID] = e
-			}
-
-			player.elements = make([]string, 0)
 		}
 
 		// Keep buffered particles ticking so they don't stack up too much

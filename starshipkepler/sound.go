@@ -208,6 +208,12 @@ func initSounds() {
 		volume: -0.7,
 	}
 
+	buffer, _ = prepareBuffer("sound/ward-die.wav")
+	soundEffects["bomb/empty"] = &soundEffect{
+		buffer: buffer,
+		volume: -0.7,
+	}
+
 	buffer, _ = prepareBuffer("sound/entity-die.wav")
 	soundEffects["entity/die"] = &soundEffect{
 		buffer: buffer,
