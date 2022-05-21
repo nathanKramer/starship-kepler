@@ -40,6 +40,5 @@ func (data *LocalData) WriteToFile() {
 		log.Fatalf("[persistence] error writing data: %v", err)
 	}
 	defer f.Close()
-	fmt.Printf("Writing to file:\n\n%s\n\n", yml)
 	f.Write(yml)
 }

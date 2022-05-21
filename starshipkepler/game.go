@@ -1088,7 +1088,7 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 		}
 
 		for bID, b := range game.data.bullets {
-			if b.data.alive && b.data.expiry.After(game.lastFrame) {
+			if b.data.alive && (b.data.expiry == time.Time{} || b.data.expiry.After(game.lastFrame)) {
 				for eID, e := range game.data.entities {
 					if e.alive && !e.spawning && b.data.Circle().Intersect(e.Circle()).Radius > 0 && e.entityType != "essence" {
 						b.DealDamage(

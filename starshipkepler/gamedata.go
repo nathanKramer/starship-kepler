@@ -406,11 +406,11 @@ func (data *gamedata) respawnPlayer() {
 }
 
 func (data *gamedata) AmbientSpawnFreq() float64 {
-	return data.ambientSpawnFreq * data.timescale
+	return data.ambientSpawnFreq / data.timescale
 }
 
 func (data *gamedata) WaveFreq() float64 {
-	return data.waveFreq * data.timescale
+	return data.waveFreq / data.timescale
 }
 
 func (game *game) PlayGameMusic() {
@@ -425,6 +425,10 @@ func (game *game) developmentGameModeUpdate(debug bool, last time.Time, totalTim
 
 func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime float64, player *entityData) {
 	updateMusic(game.data.mode)
+
+	if !game.data.player.alive {
+		return
+	}
 	// ambient spawns
 	// This spawns between 1 and 4 enemies every AmbientSpawnFreq seconds
 	if last.Sub(game.data.lastSpawn).Seconds() > game.data.AmbientSpawnFreq() && game.data.spawning {
