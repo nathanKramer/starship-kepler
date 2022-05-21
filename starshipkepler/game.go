@@ -22,12 +22,13 @@ func GameOver(game *game) {
 	PlaySound("game/over")
 	game.state = "game_over"
 	game.data.spawning = false
+	game.localData.NewScore(ScoreEntry{
+		Score: game.data.score,
+		Name:  "Nathan",
+		Time:  time.Now(),
+	})
 
-	if game.data.score > game.persistentData.Highscore {
-		game.persistentData.Highscore = game.data.score
-	}
-
-	WritePersistentData(game.persistentData)
+	game.localData.WriteToFile()
 }
 
 func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {

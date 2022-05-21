@@ -94,11 +94,11 @@ type debugInfo struct {
 }
 
 type game struct {
-	state          string
-	persistentData PersistentData
-	data           gamedata
-	menu           menu
-	grid           grid
+	state     string
+	localData LocalData
+	data      gamedata
+	menu      menu
+	grid      grid
 
 	CamPos pixel.Vec
 
@@ -325,9 +325,9 @@ func NewPacifismGame() *gamedata {
 	return data
 }
 
-func NewGame(data PersistentData) *game {
+func NewGame(data LocalData) *game {
 	game := new(game)
-	game.persistentData = data
+	game.localData = data
 	game.state = "main_menu"
 	game.data = *NewMenuGame()
 	game.menu = NewMainMenu()

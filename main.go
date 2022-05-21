@@ -63,7 +63,7 @@ func run() {
 	}
 
 	draw := starshipkepler.NewDrawContext(cfg)
-	data := starshipkepler.ReadPersistentData()
+	data := starshipkepler.ReadLocalData()
 	game := starshipkepler.NewGame(data)
 	game.PlayGameMusic()
 	uiContext := starshipkepler.NewUi(win)

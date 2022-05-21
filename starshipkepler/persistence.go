@@ -9,12 +9,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type PersistentData struct {
-	Highscore int
+type LocalData struct {
+	Scoreboard []ScoreEntry
 }
 
-func ReadPersistentData() PersistentData {
-	persistent := PersistentData{}
+func ReadLocalData() LocalData {
+	persistent := LocalData{}
 
 	data, err := ioutil.ReadFile("./gamedata.yml")
 	if err != nil {
@@ -29,7 +29,7 @@ func ReadPersistentData() PersistentData {
 	return persistent
 }
 
-func WritePersistentData(data PersistentData) {
+func (data *LocalData) WriteToFile() {
 	yml, err := yaml.Marshal(&data)
 	if err != nil {
 		log.Fatalf("[persistence] error: %v", err)
@@ -40,5 +40,6 @@ func WritePersistentData(data PersistentData) {
 		log.Fatalf("[persistence] error writing data: %v", err)
 	}
 	defer f.Close()
+	fmt.Printf("Writing to file:\n\n%s\n\n", yml)
 	f.Write(yml)
 }

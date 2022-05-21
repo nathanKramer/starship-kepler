@@ -47,12 +47,13 @@ type DrawContext struct {
 	titleFont *text.Atlas
 
 	// Text objects
-	titleTxt    *text.Text
-	gameOverTxt *text.Text
-	centeredTxt *text.Text
-	scoreTxt    *text.Text
-	consoleTxt  *text.Text
-	livesTxt    *text.Text
+	titleTxt     *text.Text
+	gameOverTxt  *text.Text
+	centeredTxt  *text.Text
+	highscoreTxt *text.Text
+	scoreTxt     *text.Text
+	consoleTxt   *text.Text
+	livesTxt     *text.Text
 }
 
 var basicFont *text.Atlas
@@ -168,6 +169,7 @@ func (d *DrawContext) SetBounds(bounds pixel.Rect) {
 	d.bloom3.SetFragmentShader(blur)
 
 	d.scoreTxt = text.New(pixel.V(-(bounds.W()/2)+120, (bounds.H()/2)-50), basicFont)
+	d.highscoreTxt = text.New(pixel.V((bounds.W()/2)-120, (bounds.H()/2)-50), basicFont)
 	d.livesTxt = text.New(pixel.V(0.0, (bounds.H()/2)-50), basicFont)
 	d.consoleTxt = text.New(pixel.V(-(bounds.W()/2)+50, (bounds.H()/2)-170), smallFont)
 }
@@ -859,6 +861,12 @@ func DrawGame(win *pixelgl.Window, game *game, d *DrawContext) {
 			d.scoreTxt.Dot.X -= (d.scoreTxt.BoundsOf(txt).W() / 2)
 			fmt.Fprintf(d.scoreTxt, txt, game.data.scoreMultiplier)
 
+			d.highscoreTxt.Clear()
+			highscore := game.localData.Highscore()
+			highscoreTxt := fmt.Sprintf("%s: %d", highscore.Name, highscore.Score)
+			d.highscoreTxt.Dot.X -= (d.highscoreTxt.BoundsOf(highscoreTxt).W() / 2)
+			fmt.Fprintf(d.highscoreTxt, highscoreTxt)
+
 			d.consoleTxt.Clear()
 			if g_debug {
 				drawDebug(d, game)
@@ -869,6 +877,13 @@ func DrawGame(win *pixelgl.Window, game *game, d *DrawContext) {
 				win,
 				pixel.IM.Scaled(d.scoreTxt.Orig, 1),
 			)
+
+			if highscore.Score > 0 {
+				d.highscoreTxt.Draw(
+					win,
+					pixel.IM.Scaled(d.highscoreTxt.Orig, 1),
+				)
+			}
 
 			d.livesTxt.Clear()
 			txt = "Lives: %d\n"
