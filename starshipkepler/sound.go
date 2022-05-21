@@ -48,6 +48,7 @@ var pacifismMusicStreamer *beep.StreamSeekCloser
 var menuMusicStreamer *beep.StreamSeekCloser
 var introStreamer *beep.StreamSeekCloser
 var musicVolume float64
+var soundVolume float64 // 0.0 - 1.0 normalizer
 
 type soundEffect struct {
 	buffer *beep.Buffer
@@ -147,6 +148,7 @@ func init() {
 }
 
 func initSounds() {
+	soundVolume = 1.0 // In the future this will be a setting
 	shotBuffer, shotSoundFormat = prepareBuffer("sound/shoot.mp3")
 	soundEffects["sound/shoot.mp3"] = &soundEffect{
 		buffer: shotBuffer,
@@ -277,7 +279,7 @@ func PlaySound(soundName string) {
 	volume := &effects.Volume{
 		Streamer: sound,
 		Base:     10,
-		Volume:   soundEffect.volume,
+		Volume:   soundEffect.volume * soundVolume,
 		Silent:   false,
 	}
 
