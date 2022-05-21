@@ -47,6 +47,7 @@ var musicStreamer *beep.StreamSeekCloser
 var pacifismMusicStreamer *beep.StreamSeekCloser
 var menuMusicStreamer *beep.StreamSeekCloser
 var introStreamer *beep.StreamSeekCloser
+var musicVolume float64
 
 type soundEffect struct {
 	buffer *beep.Buffer
@@ -162,7 +163,7 @@ func initSounds() {
 	shotBuffer3.Streamer(0, shotBuffer3.Len())
 	soundEffects["sound/shoot3.mp3"] = &soundEffect{
 		buffer: shotBuffer3,
-		volume: -1.2,
+		volume: -1.3,
 	}
 
 	shotBuffer4, shotSoundFormat = prepareBuffer("sound/shoot4.mp3")
@@ -186,7 +187,7 @@ func initSounds() {
 	buffer, _ := prepareBuffer("sound/player-die.wav")
 	soundEffects["player/die"] = &soundEffect{
 		buffer: buffer,
-		volume: -0.8,
+		volume: -0.5,
 	}
 
 	buffer, _ = prepareBuffer("sound/game-over.wav")
@@ -198,29 +199,31 @@ func initSounds() {
 	buffer, _ = prepareBuffer("sound/ward-spawn.wav")
 	soundEffects["ward/spawn"] = &soundEffect{
 		buffer: buffer,
-		volume: -0.8,
+		volume: -0.6,
 	}
 
 	buffer, _ = prepareBuffer("sound/ward-die.wav")
 	soundEffects["ward/die"] = &soundEffect{
 		buffer: buffer,
-		volume: -0.8,
+		volume: -0.7,
 	}
 
 	buffer, _ = prepareBuffer("sound/entity-die.wav")
 	soundEffects["entity/die"] = &soundEffect{
 		buffer: buffer,
-		volume: -1.3,
+		volume: -1.2,
 	}
 
 	spawnBuffer, _ = prepareBuffer("sound/spawn.mp3")
 	soundEffects["sound/spawn.mp3"] = &soundEffect{
 		buffer: spawnBuffer,
-		volume: -0.9,
+		volume: -1.2,
 	}
 }
 
 func initMusic() {
+	musicVolume = -0.3
+
 	musicStreamer, _ := prepareStreamer("sound/music-evolved.mp3")
 	musicStreamers["evolved"] = *musicStreamer
 
@@ -251,7 +254,15 @@ func PlaySong(songName string) {
 	}
 
 	s.Seek(0)
-	speaker.Play(s)
+
+	volume := &effects.Volume{
+		Streamer: s,
+		Base:     10,
+		Volume:   musicVolume,
+		Silent:   false,
+	}
+
+	speaker.Play(volume)
 }
 
 func PlaySound(soundName string) {

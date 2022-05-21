@@ -819,7 +819,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 		volume := &effects.Volume{
 			Streamer: sound,
 			Base:     10,
-			Volume:   -0.6,
+			Volume:   -1.0,
 			Silent:   false,
 		}
 		speaker.Play(volume)
