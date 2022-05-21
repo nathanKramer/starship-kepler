@@ -1461,7 +1461,7 @@ func UpdateGame(win *pixelgl.Window, game *game, ui *uiContext) {
 
 		// kill bullets
 		for bID, b := range game.data.bullets {
-			if !b.data.alive && time.Now().After(b.data.born.Add(time.Duration(b.duration*1000)*time.Millisecond)) {
+			if !b.data.alive || (b.duration != 0.0 && time.Now().After(b.data.born.Add(time.Duration(b.duration*1000)*time.Millisecond))) {
 				game.data.bullets[bID] = bullet{}
 			}
 		}
