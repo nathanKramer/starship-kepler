@@ -436,7 +436,6 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 	// This spawns between 1 and 4 enemies every AmbientSpawnFreq seconds
 	if last.Sub(game.data.lastSpawn).Seconds() > game.data.AmbientSpawnFreq() && game.data.spawning {
 		// spawn
-		spawns := make([]entityData, 0, game.data.spawnCount)
 		for i := 0; i < game.data.spawnCount; i++ {
 			pos := pixel.V(
 				float64(rand.Intn(worldWidth)-worldWidth/2),
@@ -467,12 +466,10 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 				enemy = *NewSnek(pos.X, pos.Y)
 			}
 
-			spawns = append(spawns, enemy)
+			game.data.newEntities = InlineAppendEntities(game.data.newEntities, enemy)
 		}
 
-		PlaySpawnSounds(spawns)
-		game.data.newEntities = InlineAppendEntities(game.data.newEntities, spawns...)
-		game.data.spawns += len(spawns)
+		PlaySpawnSounds(game.data.newEntities)
 		game.data.lastSpawn = time.Now()
 
 		game.data.spawnCount = 1
@@ -496,9 +493,6 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 	firstWave := game.data.lastWave == (time.Time{}) && totalTime >= 2
 	subsequentWave := (game.data.lastWave != (time.Time{}) &&
 		(last.Sub(game.data.lastWave).Seconds() >= game.data.WaveFreq()) || waveDead)
-
-	// spawnCount + wave N
-	spawns := make([]entityData, 0, 200)
 
 	// waves happen every waveFreq seconds
 	if firstWave || subsequentWave {
@@ -540,7 +534,8 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 						p.X,
 						p.Y,
 					)
-					spawns = append(spawns, *enemy)
+					game.data.newEntities = InlineAppendEntities(game.data.newEntities, *enemy)
+
 				}
 			} else if r <= 0.3 {
 				count := 2 + rand.Intn(4)
@@ -550,7 +545,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 						p.X,
 						p.Y,
 					)
-					spawns = append(spawns, *enemy)
+					game.data.newEntities = InlineAppendEntities(game.data.newEntities, *enemy)
 				}
 			} else if r <= 0.4 {
 				count := 2 + rand.Intn(4)
@@ -560,7 +555,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 						p.X,
 						p.Y,
 					)
-					spawns = append(spawns, *enemy)
+					game.data.newEntities = InlineAppendEntities(game.data.newEntities, *enemy)
 				}
 			} else if r <= 0.45 {
 				count := 8 + rand.Intn(4)
@@ -570,7 +565,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 						p.X,
 						p.Y,
 					)
-					spawns = append(spawns, *enemy)
+					game.data.newEntities = InlineAppendEntities(game.data.newEntities, *enemy)
 				}
 			} else if r <= 0.55 {
 				r := rand.Float64() * (0.1 + math.Min(game.data.notoriety, 0.8))
@@ -613,11 +608,8 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 				for i := 0.0; i < total; i++ { // circle of followers
 					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
 					spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(450.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-					spawns = append(
-						spawns,
-						*NewFollower(spawnPos.X, spawnPos.Y),
-						*NewFollower(spawnPos2.X, spawnPos2.Y),
-					)
+					game.data.newEntities = InlineAppendEntities(game.data.newEntities, *NewFollower(spawnPos.X, spawnPos.Y),
+						*NewFollower(spawnPos2.X, spawnPos2.Y))
 				}
 			} else if r <= 0.575 {
 				total := 8.0
@@ -625,11 +617,8 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 				for i := 0.0; i < total; i++ { // circle of dodgers
 					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
 					spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(450.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-					spawns = append(
-						spawns,
-						*NewDodger(spawnPos.X, spawnPos.Y),
-						*NewDodger(spawnPos2.X, spawnPos2.Y),
-					)
+					game.data.newEntities = InlineAppendEntities(game.data.newEntities, *NewDodger(spawnPos.X, spawnPos.Y),
+						*NewDodger(spawnPos2.X, spawnPos2.Y))
 				}
 			} else if r <= 0.6 {
 				total := 5.0
@@ -637,10 +626,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 				for i := 0.0; i < total; i++ { // circle of replicators
 					for j := 0; j < 16; j++ {
 						spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0).Add(randomVector(16.0)).Add(player.origin)
-						spawns = append(
-							spawns,
-							*NewReplicator(spawnPos.X, spawnPos.Y),
-						)
+						game.data.newEntities = InlineAppendEntities(game.data.newEntities, *NewReplicator(spawnPos.X, spawnPos.Y))
 					}
 				}
 			} else if r <= 0.64 {
@@ -649,11 +635,9 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 				for i := 0.0; i < total; i++ { // circle of snakes
 					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
 					spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(550.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-					spawns = append(
-						spawns,
-						*NewSnek(spawnPos.X, spawnPos.Y),
-						*NewSnek(spawnPos2.X, spawnPos2.Y),
-					)
+					game.data.newEntities = InlineAppendEntities(game.data.newEntities, *NewSnek(spawnPos.X, spawnPos.Y),
+						*NewSnek(spawnPos2.X, spawnPos2.Y))
+
 				}
 			} else if r <= 0.67 {
 				total := 4.0
@@ -661,11 +645,9 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 				for i := 0.0; i < total; i++ { // circle of pink squares
 					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(450.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
 					spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(400.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-					spawns = append(
-						spawns,
-						*NewPinkSquare(spawnPos.X, spawnPos.Y),
-						*NewPinkSquare(spawnPos2.X, spawnPos2.Y),
-					)
+					game.data.newEntities = InlineAppendEntities(game.data.newEntities, *NewPinkSquare(spawnPos.X, spawnPos.Y),
+						*NewPinkSquare(spawnPos2.X, spawnPos2.Y))
+
 				}
 			} else if r <= 0.75 {
 				game.data.spawning = false       // corner spawns will feel like a bit of a breather
@@ -686,19 +668,15 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 						corner.X,
 						corner.Y,
 					)
-					spawns = append(
-						spawns, *blackhole, *snek, *pink, *dodger,
-					)
+					game.data.newEntities = InlineAppendEntities(game.data.newEntities, *blackhole, *snek, *pink, *dodger)
 				}
 			} else if r <= 0.85 {
 				total := 4.0
 				step := 360.0 / total
 				for i := 0.0; i < total; i++ { // circle of blackholes
 					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-					spawns = append(
-						spawns,
-						*NewBlackHole(spawnPos.X, spawnPos.Y),
-					)
+					game.data.newEntities = InlineAppendEntities(game.data.newEntities,
+						*NewBlackHole(spawnPos.X, spawnPos.Y))
 				}
 			} else {
 				total := 14.0
@@ -706,11 +684,8 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 				for i := 0.0; i < total; i++ { // big circle of followers
 					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
 					spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(650.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
-					spawns = append(
-						spawns,
-						*NewFollower(spawnPos.X, spawnPos.Y),
-						*NewFollower(spawnPos2.X, spawnPos2.Y),
-					)
+					game.data.newEntities = InlineAppendEntities(game.data.newEntities, *NewFollower(spawnPos.X, spawnPos.Y),
+						*NewFollower(spawnPos2.X, spawnPos2.Y))
 				}
 			}
 		}
@@ -777,7 +752,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 					} else {
 						panic(fmt.Errorf("Unhandled entity type: %s", wave.entityType))
 					}
-					spawns = append(spawns, *enemy)
+					game.data.newEntities = InlineAppendEntities(game.data.newEntities, *enemy)
 				}
 
 				wave.lastSpawn = time.Now()
@@ -787,9 +762,14 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 	}
 
 	// spawn entitites
-	PlaySpawnSounds(spawns)
-	game.data.spawns += len(spawns)
-	game.data.newEntities = InlineAppendEntities(game.data.newEntities, spawns...)
+	spawnCount := 0
+	for _, ent := range game.data.newEntities {
+		if ent.entityType != "" {
+			spawnCount = spawnCount + 1
+		}
+	}
+	game.data.spawns += spawnCount
+	PlaySpawnSounds(game.data.newEntities)
 
 	// adjust game rules
 
@@ -844,7 +824,6 @@ func (game *game) pacifismGameModeUpdate(debug bool, last time.Time, totalTime f
 	// ambient spawns
 	if last.Sub(game.data.lastSpawn).Seconds() > game.data.AmbientSpawnFreq() && game.data.spawning {
 		// spawn
-		spawns := make([]entityData, 0, game.data.spawnCount)
 		corners := [4]pixel.Vec{
 			pixel.V(-(worldWidth/2)+160, -(worldHeight/2)+160),
 			pixel.V(-(worldWidth/2)+160, (worldHeight/2)-160),
@@ -860,7 +839,7 @@ func (game *game) pacifismGameModeUpdate(debug bool, last time.Time, totalTime f
 		for i := 0; i < game.data.spawnCount; i++ {
 			sPos := pos.Add(pixel.V((rand.Float64()*200.0)-100.0, (rand.Float64()*200.0)-100.0))
 			enemy := *NewFollower(sPos.X, sPos.Y)
-			spawns = append(spawns, enemy)
+			game.data.newEntities = InlineAppendEntities(game.data.newEntities, enemy)
 		}
 
 		gateCount := game.data.spawnCount / 8
@@ -879,12 +858,10 @@ func (game *game) pacifismGameModeUpdate(debug bool, last time.Time, totalTime f
 					float64(rand.Intn(worldHeight)-worldHeight/2),
 				)
 			}
-			spawns = append(spawns, *NewGate(pos.X, pos.Y))
+			game.data.newEntities = InlineAppendEntities(game.data.newEntities, *NewGate(pos.X, pos.Y))
 		}
 
-		PlaySpawnSounds(spawns)
-		game.data.newEntities = InlineAppendEntities(game.data.newEntities, spawns...)
-		game.data.spawns += len(spawns)
+		PlaySpawnSounds(game.data.newEntities)
 		game.data.lastSpawn = time.Now()
 
 		if game.data.spawns%10 == 0 && game.data.spawnCount < 40 {
