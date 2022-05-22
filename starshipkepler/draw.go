@@ -336,7 +336,8 @@ func drawDebug(d *DrawContext, game *game) {
 	txt = "multiplierReward: %d kills required\n"
 	fmt.Fprintf(d.consoleTxt, txt, game.data.multiplierReward-game.data.killsSinceBorn)
 	// }
-
+	txt = "wave seed: %f\n"
+	fmt.Fprintf(d.consoleTxt, txt, game.data.landingPartyR)
 }
 
 func DrawGame(win *pixelgl.Window, game *game, d *DrawContext) {

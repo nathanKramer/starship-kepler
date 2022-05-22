@@ -48,6 +48,7 @@ type gamedata struct {
 	lives           int
 	bombs           int
 	scoreMultiplier int
+	landingPartyR   float64
 
 	entities     []entityData
 	bullets      []bullet
@@ -227,6 +228,7 @@ func NewGameData() *gamedata {
 	gameData.lives = 500
 	gameData.bombs = 3
 	gameData.scoreMultiplier = 1
+	gameData.landingPartyR = 0.0
 
 	gameData.entities = make([]entityData, 0, 200)
 	gameData.bullets = make([]bullet, 0, 500)
@@ -469,7 +471,6 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 			game.data.newEntities = InlineAppendEntities(game.data.newEntities, enemy)
 		}
 
-		PlaySpawnSounds(game.data.newEntities)
 		game.data.lastSpawn = time.Now()
 
 		game.data.spawnCount = 1
@@ -518,7 +519,8 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 		}
 
 		// one-off landing party
-		r := rand.Float64() * (0.1 + math.Min(game.data.notoriety, 0.8))
+		r := rand.Float64() * (0.1 + math.Min(game.data.notoriety, 0.9))
+		game.data.landingPartyR = r
 		fmt.Printf("[LandingPartySpawn] %f %s\n", r, time.Now().String())
 		// landing party spawn
 		{
@@ -630,7 +632,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 					}
 				}
 			} else if r <= 0.64 {
-				total := 10.0
+				total := 8.0
 				step := 360.0 / total
 				for i := 0.0; i < total; i++ { // circle of snakes
 					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(500.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
@@ -678,7 +680,7 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 					game.data.newEntities = InlineAppendEntities(game.data.newEntities,
 						*NewBlackHole(spawnPos.X, spawnPos.Y))
 				}
-			} else {
+			} else if r <= 0.95 {
 				total := 14.0
 				step := 360.0 / total
 				for i := 0.0; i < total; i++ { // big circle of followers
@@ -686,6 +688,14 @@ func (game *game) evolvedGameModeUpdate(debug bool, last time.Time, totalTime fl
 					spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(650.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
 					game.data.newEntities = InlineAppendEntities(game.data.newEntities, *NewFollower(spawnPos.X, spawnPos.Y),
 						*NewFollower(spawnPos2.X, spawnPos2.Y))
+				}
+			} else {
+				total := 20.0
+				step := 360.0 / total
+				for i := 0.0; i < total; i++ { // big circle of followers and dodgers
+					spawnPos := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(600.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+					spawnPos2 := pixel.V(1.0, 0.0).Rotated(i * step * math.Pi / 180.0).Unit().Scaled(650.0 + (rand.Float64()*64 - 32.0)).Add(player.origin)
+					game.data.newEntities = InlineAppendEntities(game.data.newEntities, *NewDodger(spawnPos.X, spawnPos.Y), *NewFollower(spawnPos2.X, spawnPos2.Y))
 				}
 			}
 		}
