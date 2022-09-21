@@ -24,7 +24,7 @@ func GameOver(game *game) {
 	game.data.spawning = false
 	game.localData.NewScore(ScoreEntry{
 		Score: game.data.score,
-		Name:  "Nathan",
+		Name:  "Highscore",
 		Time:  time.Now(),
 	})
 

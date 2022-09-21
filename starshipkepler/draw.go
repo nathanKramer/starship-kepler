@@ -169,7 +169,7 @@ func (d *DrawContext) SetBounds(bounds pixel.Rect) {
 	d.bloom3.SetFragmentShader(blur)
 
 	d.scoreTxt = text.New(pixel.V(-(bounds.W()/2)+120, (bounds.H()/2)-50), basicFont)
-	d.highscoreTxt = text.New(pixel.V((bounds.W()/2)-120, (bounds.H()/2)-50), basicFont)
+	d.highscoreTxt = text.New(pixel.V((bounds.W()/2)-180, (bounds.H()/2)-50), basicFont)
 	d.livesTxt = text.New(pixel.V(0.0, (bounds.H()/2)-50), basicFont)
 	d.consoleTxt = text.New(pixel.V(-(bounds.W()/2)+50, (bounds.H()/2)-170), smallFont)
 }
