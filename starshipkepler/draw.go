@@ -340,14 +340,15 @@ func drawDebug(d *DrawContext, game *game) {
 	fmt.Fprintf(d.consoleTxt, txt, game.data.landingPartyR)
 }
 
-func DrawGame(win *pixelgl.Window, game *game, d *DrawContext) {
+func DrawGame(win *pixelgl.Window, game *game, d *DrawContext, gameScale float64) {
 	d.imd.Reset()
 	d.uiDraw.Reset()
 	d.bulletDraw.Reset()
 	d.particleDraw.Reset()
 	d.tmpTarget.Reset()
 
-	cam := pixel.IM.Moved(game.CamPos.Scaled(-1))
+	cam := pixel.IM.Moved(game.CamPos.Scaled(-1 * gameScale))
+	cam = cam.Scaled(game.CamPos, gameScale)
 	d.PrimaryCanvas.SetMatrix(cam)
 
 	// draw_

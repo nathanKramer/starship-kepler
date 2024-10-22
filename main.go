@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	_ "image/png"
 	"log"
 	"math/rand"
@@ -40,6 +41,10 @@ func run() {
 	monitor := pixelgl.PrimaryMonitor()
 	width := config.screenWidth
 	height := config.screenHeight
+
+	screenWidth, _ := monitor.Size()
+	scale := screenWidth / 1920
+	fmt.Printf("Scale: %f\n", scale)
 
 	if width > 1920 {
 		width = 1920
@@ -83,7 +88,7 @@ func run() {
 			draw.SetBounds(win.Bounds())
 		}
 
-		starshipkepler.DrawGame(win, game, draw)
+		starshipkepler.DrawGame(win, game, draw, scale)
 		win.Update()
 	}
 }
